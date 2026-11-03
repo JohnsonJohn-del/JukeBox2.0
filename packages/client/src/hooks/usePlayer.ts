@@ -53,10 +53,11 @@ function loadYouTubeAPI(): Promise<void> {
 }
 
 export function usePlayer(
-  containerId: string = 'youtube-player-element',
+  containerRef: React.RefObject<HTMLDivElement | null>,
   options?: {
     onEnded?: () => void;
     onError?: (errorCode: number) => void;
+    onReady?: () => void;
   }
 ) {
   const playerRef = useRef<YT.Player | null>(null);
@@ -125,11 +126,11 @@ export function usePlayer(
             }
           }
         } catch {
-          // ignore during video transitions
+          // ignore during transitions
         }
       }
 
-      // Active room timer fallback: If room playbackState is 'playing', smoothly advance seconds
+      // Smooth timer advance if playing
       if (!readFromPlayer && usePlayerStore.getState().playbackState === 'playing') {
         const current = usePlayerStore.getState().currentTime;
         const maxDur = usePlayerStore.getState().duration;
@@ -144,31 +145,27 @@ export function usePlayer(
     try {
       await loadYouTubeAPI();
 
-      // If player already exists on window and is healthy
-      if (window.ytPlayer && typeof window.ytPlayer.playVideo === 'function') {
-        playerRef.current = window.ytPlayer;
+      const container = containerRef.current;
+      if (!container) return;
+
+      // Check if existing player iframe is still connected to container
+      if (
+        playerRef.current &&
+        typeof playerRef.current.playVideo === 'function' &&
+        container.contains(playerRef.current.getIframe?.() || null)
+      ) {
         setIsReady(true);
-        startSyncInterval(window.ytPlayer);
+        startSyncInterval(playerRef.current);
         if (pendingVideoRef.current) {
-          loadPendingVideo(window.ytPlayer);
+          loadPendingVideo(playerRef.current);
         }
         return;
       }
 
-      // Poll up to 30 times (4.5s) for container to mount in DOM
-      let attempts = 0;
-      while (!document.getElementById(containerId) && attempts < 30) {
-        await new Promise((r) => setTimeout(r, 150));
-        attempts++;
-      }
+      // Prepare unmanaged mount slot
+      container.innerHTML = '<div id="youtube-player-slot" class="w-full h-full"></div>';
 
-      const container = document.getElementById(containerId);
-      if (!container) {
-        console.warn('[usePlayer] Element not found after polling:', containerId);
-        return;
-      }
-
-      const player = new window.YT.Player(containerId, {
+      const player = new window.YT.Player('youtube-player-slot', {
         height: '100%',
         width: '100%',
         playerVars: {
@@ -185,8 +182,7 @@ export function usePlayer(
             playerRef.current = event.target;
             window.ytPlayer = event.target;
             setIsReady(true);
-
-            console.log('[YouTube] Player ready on container:', containerId);
+            optionsRef.current?.onReady?.();
             startSyncInterval(event.target);
 
             if (pendingVideoRef.current) {
@@ -231,7 +227,7 @@ export function usePlayer(
     } catch (err) {
       console.error('[usePlayer] Initialization failed:', err);
     }
-  }, [containerId, loadPendingVideo, setPlaybackState, startSyncInterval]);
+  }, [containerRef, loadPendingVideo, setPlaybackState, startSyncInterval]);
 
   useEffect(() => {
     initializePlayer();
@@ -326,6 +322,20 @@ export function usePlayer(
       return 0;
     }
   }, []);
+
+  useEffect(() => {
+    usePlayerStore.getState().setPlayerControls({
+      play,
+      pause,
+      seekTo,
+      mute,
+      unMute,
+      loadVideo,
+    });
+    return () => {
+      usePlayerStore.getState().setPlayerControls(null);
+    };
+  }, [play, pause, seekTo, mute, unMute, loadVideo]);
 
   return {
     loadVideo,

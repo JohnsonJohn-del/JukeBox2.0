@@ -4,7 +4,7 @@ import * as queueService from '../services/queue.service'
 import { SocketData, ClientToServerEvents, ServerToClientEvents, InterServerEvents } from '../types/socket'
 import { getDbClient } from '../config/database'
 
-interface RoomPlaybackState {
+export interface RoomPlaybackState {
   currentTrack: QueueItem | null
   playbackState: 'playing' | 'paused' | 'stopped'
   playbackPosition: number
@@ -14,6 +14,27 @@ interface RoomPlaybackState {
 }
 
 const roomPlaybackStates = new Map<string, RoomPlaybackState>()
+
+export function persistPlaybackState(roomId: string, state: RoomPlaybackState): void {
+  try {
+    const db = getDbClient()
+    db.from('rooms')
+      .update({
+        current_track_id: state.currentTrack?.id || null,
+        current_track: state.currentTrack,
+        playback_state: state.playbackState,
+        playback_position: state.playbackPosition,
+        playback_updated_at: Date.now(),
+        is_video_mode: state.isVideoMode,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', roomId)
+      .then(() => {})
+      .catch((err: any) => console.warn('[Playback] DB persist error:', err.message))
+  } catch (err: any) {
+    console.warn('[Playback] persistPlaybackState error:', err.message)
+  }
+}
 
 export function getOrCreatePlaybackState(roomId: string): RoomPlaybackState {
   let state = roomPlaybackStates.get(roomId)
@@ -26,22 +47,32 @@ export function getOrCreatePlaybackState(roomId: string): RoomPlaybackState {
       isVideoMode: true,
       playedTrackIds: new Set(),
     }
+
+    try {
+      const db = getDbClient()
+      const { data: room } = (db.from('rooms').select('*').eq('id', roomId) as any).maybeSingle?.() || {}
+      if (room) {
+        if (room.current_track) state.currentTrack = room.current_track
+        if (room.playback_state) state.playbackState = room.playback_state
+        if (typeof room.playback_position === 'number') state.playbackPosition = room.playback_position
+        if (room.is_video_mode !== undefined) state.isVideoMode = room.is_video_mode
+        if (room.playback_state === 'playing' && room.playback_updated_at) {
+          const elapsed = (Date.now() - Number(room.playback_updated_at)) / 1000
+          state.playbackPosition += Math.max(0, elapsed)
+          state.playbackStartTime = Date.now()
+        }
+      }
+    } catch {
+      // Local memory fallback
+    }
+
     roomPlaybackStates.set(roomId, state)
   }
   return state
 }
 
 export function getPlaybackState(roomId: string): PlaybackState {
-  const state = roomPlaybackStates.get(roomId)
-  if (!state) {
-    return {
-      currentTrack: null,
-      playbackState: 'stopped',
-      playbackPosition: 0,
-      playbackStartTime: null,
-      isVideoMode: true,
-    }
-  }
+  const state = getOrCreatePlaybackState(roomId)
 
   let position = state.playbackPosition
   if (state.playbackState === 'playing' && state.playbackStartTime) {
@@ -51,7 +82,7 @@ export function getPlaybackState(roomId: string): PlaybackState {
   return {
     currentTrack: state.currentTrack,
     playbackState: state.playbackState,
-    playbackPosition: position,
+    playbackPosition: Math.max(0, position),
     playbackStartTime: state.playbackStartTime,
     isVideoMode: state.isVideoMode,
   }
@@ -116,6 +147,8 @@ export function registerPlaybackHandlers(
         }
       }
 
+      persistPlaybackState(roomId, state)
+
       io.to(roomId).emit('playback_state', {
         state: 'playing',
         position: state.playbackPosition,
@@ -142,6 +175,8 @@ export function registerPlaybackHandlers(
       state.playbackState = 'paused'
       state.playbackPosition = position !== undefined ? position : state.playbackPosition
       state.playbackStartTime = null
+
+      persistPlaybackState(roomId, state)
 
       io.to(roomId).emit('playback_state', {
         state: 'paused',
@@ -172,6 +207,8 @@ export function registerPlaybackHandlers(
         state.playbackStartTime = Date.now()
       }
 
+      persistPlaybackState(roomId, state)
+
       io.to(roomId).emit('seeked', { position })
     } catch (error: any) {
       socket.emit('error', { message: error.message || 'Seek failed', code: 'SEEK_ERROR' })
@@ -199,12 +236,29 @@ export function registerPlaybackHandlers(
         state.playbackStartTime = Date.now()
       }
 
+      persistPlaybackState(roomId, state)
+
       io.to(roomId).emit('video_mode_changed', {
         isVideoMode: state.isVideoMode,
         position: state.playbackPosition,
       })
     } catch (error: any) {
       socket.emit('error', { message: error.message || 'Failed to toggle Video Mode', code: 'TOGGLE_VIDEO_ERROR' })
+    }
+  })
+
+  // Heartbeat progress update from host for high-precision synchronization
+  socket.on('host_progress' as any, async (payload: any) => {
+    try {
+      const { roomId, position } = payload
+      const state = roomPlaybackStates.get(roomId)
+      if (state && state.playbackState === 'playing') {
+        state.playbackPosition = position
+        state.playbackStartTime = Date.now()
+        persistPlaybackState(roomId, state)
+      }
+    } catch {
+      // Non-blocking progress sync
     }
   })
 
@@ -232,6 +286,9 @@ export function registerPlaybackHandlers(
       state.playbackState = nextTrack ? 'playing' : 'stopped'
       state.playbackPosition = 0
       state.playbackStartTime = nextTrack ? Date.now() : null
+      state.isVideoMode = true
+
+      persistPlaybackState(roomId, state)
 
       io.to(roomId).emit('track_changed', { track: nextTrack })
 
@@ -268,6 +325,9 @@ export function registerPlaybackHandlers(
         state.playbackState = 'playing'
         state.playbackPosition = 0
         state.playbackStartTime = Date.now()
+        state.isVideoMode = true
+
+        persistPlaybackState(roomId, state)
 
         io.to(roomId).emit('track_changed', { track: prevTrack })
         io.to(roomId).emit('playback_state', {
@@ -281,6 +341,7 @@ export function registerPlaybackHandlers(
       } else {
         state.playbackPosition = 0
         state.playbackStartTime = state.playbackState === 'playing' ? Date.now() : null
+        persistPlaybackState(roomId, state)
         io.to(roomId).emit('seeked', { position: 0 })
       }
     } catch (error: any) {
@@ -291,36 +352,19 @@ export function registerPlaybackHandlers(
   socket.on('request_sync', async (payload) => {
     try {
       const { roomId, clientSendTime } = payload
-      const state = roomPlaybackStates.get(roomId)
+      const state = getOrCreatePlaybackState(roomId)
 
-      let position = 0
-      let playbackState: 'playing' | 'paused' | 'stopped' = 'stopped'
-      let currentTrack: QueueItem | null = null
-      let isVideoMode = false
-
-      if (state) {
-        currentTrack = state.currentTrack
-        playbackState = state.playbackState
-        isVideoMode = state.isVideoMode
-
-        if (state.playbackState === 'playing' && state.playbackStartTime) {
-          position = state.playbackPosition + (Date.now() - state.playbackStartTime) / 1000
-        } else {
-          position = state.playbackPosition
-        }
-      } else {
-        const queue = await queueService.getQueue(roomId)
-        if (queue.length > 0) {
-          currentTrack = queue[0]
-        }
+      let position = state.playbackPosition
+      if (state.playbackState === 'playing' && state.playbackStartTime) {
+        position += (Date.now() - state.playbackStartTime) / 1000
       }
 
       socket.emit('sync_state', {
         serverTimestamp: Date.now(),
-        playbackState,
-        playbackPosition: position,
-        currentTrack,
-        isVideoMode,
+        playbackState: state.playbackState,
+        playbackPosition: Math.max(0, position),
+        currentTrack: state.currentTrack,
+        isVideoMode: state.isVideoMode,
         clientSendTime,
       })
     } catch (error: any) {

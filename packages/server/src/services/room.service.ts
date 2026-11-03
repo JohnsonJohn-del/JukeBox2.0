@@ -257,6 +257,7 @@ export async function getRoom(roomId: string): Promise<{
   room: Room | null
   members: RoomMember[]
   queue: QueueItem[]
+  playback?: any
 }> {
   const db = getDbClient()
 
@@ -279,10 +280,30 @@ export async function getRoom(roomId: string): Promise<{
     .eq('is_played', false)
     .order('position', { ascending: true })
 
+  let playback: any = null
+  try {
+    const { getPlaybackState } = require('../sockets/playback.socket')
+    playback = getPlaybackState(roomId)
+  } catch {
+    if (room) {
+      let pos = (room as any).playback_position || 0
+      if ((room as any).playback_state === 'playing' && (room as any).playback_updated_at) {
+        pos += Math.max(0, (Date.now() - Number((room as any).playback_updated_at)) / 1000)
+      }
+      playback = {
+        currentTrack: (room as any).current_track || null,
+        playbackState: (room as any).playback_state || 'stopped',
+        playbackPosition: pos,
+        isVideoMode: (room as any).is_video_mode !== false,
+      }
+    }
+  }
+
   return {
     room: room || null,
     members: members || [],
     queue: queue || [],
+    playback,
   }
 }
 

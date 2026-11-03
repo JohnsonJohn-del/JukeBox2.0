@@ -10,6 +10,7 @@ import { useQueue } from '@/hooks/useQueue';
 import { useAuthStore } from '@/store/authStore';
 import { useRoomStore } from '@/store/roomStore';
 import { useQueueStore } from '@/store/queueStore';
+import { usePlayerStore } from '@/store/playerStore';
 import { useThemeStore } from '@/store/themeStore';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { roomService } from '@/services/room';
@@ -89,6 +90,29 @@ export default function RoomPage() {
         setRoom(data.room);
         setMembers(data.members);
 
+        if (data.queue) {
+          useQueueStore.getState().setQueue(data.queue);
+        }
+
+        if (data.playback) {
+          if (data.playback.currentTrack) {
+            useQueueStore.getState().setCurrentTrack(data.playback.currentTrack);
+            if (data.playback.currentTrack.duration) {
+              usePlayerStore.getState().setDuration(data.playback.currentTrack.duration);
+            }
+          }
+          if (data.playback.playbackState) {
+            usePlayerStore.getState().setPlaybackState(data.playback.playbackState);
+          }
+          if (typeof data.playback.playbackPosition === 'number') {
+            usePlayerStore.getState().setCurrentTime(data.playback.playbackPosition);
+          }
+          if (data.playback.isVideoMode !== undefined) {
+            usePlayerStore.getState().setIsVideoMode(data.playback.isVideoMode);
+            useRoomStore.getState().setVideoMode(data.playback.isVideoMode);
+          }
+        }
+
         const myMember = data.members.find((member: any) =>
           member.userId === user?.id ||
           member.user_id === user?.id
@@ -159,6 +183,29 @@ export default function RoomPage() {
       .then((data) => {
         setRoom(data.room);
         setMembers(data.members);
+
+        if (data.queue) {
+          useQueueStore.getState().setQueue(data.queue);
+        }
+
+        if (data.playback) {
+          if (data.playback.currentTrack) {
+            useQueueStore.getState().setCurrentTrack(data.playback.currentTrack);
+            if (data.playback.currentTrack.duration) {
+              usePlayerStore.getState().setDuration(data.playback.currentTrack.duration);
+            }
+          }
+          if (data.playback.playbackState) {
+            usePlayerStore.getState().setPlaybackState(data.playback.playbackState);
+          }
+          if (typeof data.playback.playbackPosition === 'number') {
+            usePlayerStore.getState().setCurrentTime(data.playback.playbackPosition);
+          }
+          if (data.playback.isVideoMode !== undefined) {
+            usePlayerStore.getState().setIsVideoMode(data.playback.isVideoMode);
+            useRoomStore.getState().setVideoMode(data.playback.isVideoMode);
+          }
+        }
 
         const myMember = data.members.find((member: any) =>
           member.userId === user?.id ||

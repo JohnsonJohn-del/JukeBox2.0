@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Room, RoomMember, User } from '@/types';
+import type { Room, RoomMember, User, QueueItem } from '@/types';
 
 interface CreateRoomResponse {
   room: Room;
@@ -16,6 +16,13 @@ export interface JoinRoomResponse {
 interface GetRoomResponse {
   room: Room;
   members: RoomMember[];
+  queue?: QueueItem[];
+  playback?: {
+    currentTrack: QueueItem | null;
+    playbackState: 'playing' | 'paused' | 'stopped' | 'buffering';
+    playbackPosition: number;
+    isVideoMode?: boolean;
+  };
 }
 
 interface GetRoomByCodeResponse {

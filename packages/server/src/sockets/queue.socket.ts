@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io'
 import * as queueService from '../services/queue.service'
-import { getOrCreatePlaybackState } from './playback.socket'
+import { getOrCreatePlaybackState, persistPlaybackState } from './playback.socket'
 import { SocketData, ClientToServerEvents, ServerToClientEvents, InterServerEvents } from '../types/socket'
 
 export function registerQueueHandlers(
@@ -85,6 +85,7 @@ export function registerQueueHandlers(
       state.playbackPosition = 0
       state.playbackStartTime = Date.now()
       state.isVideoMode = true
+      persistPlaybackState(roomId, state)
 
       io.to(roomId).emit('track_changed', { track })
       io.to(roomId).emit('playback_state', {

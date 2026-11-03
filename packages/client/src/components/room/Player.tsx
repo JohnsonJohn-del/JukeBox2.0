@@ -13,7 +13,6 @@ import {
   Disc3,
   Sparkles,
   Video,
-  Tv,
   Film,
   AlertCircle,
 } from 'lucide-react';
@@ -37,6 +36,7 @@ function formatTime(seconds: number): string {
 }
 
 export function Player() {
+  const playerContainerRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const [muted, setMuted] = useState(false);
   const [userInteracted, setUserInteracted] = useState(false);
@@ -59,9 +59,8 @@ export function Player() {
 
   const handlePlayerError = useCallback((errorCode: number) => {
     console.warn('[Player] YouTube error received:', errorCode);
-    // Error 101 or 150 = embedding restricted by owner
     if (errorCode === 101 || errorCode === 150) {
-      toast.error('Embedded playback restricted by copyright owner. Trying audio stream...', {
+      toast.error('Embedded playback restricted by owner. Trying audio/music stream...', {
         duration: 4000,
         icon: '⚠️',
       });
@@ -75,6 +74,13 @@ export function Player() {
     }
   }, [currentTrack, currentTime, setIsVideoMode, setVideoMode]);
 
+  // Stage B Sync: When player is ready, non-hosts request authoritative sync
+  const handlePlayerReady = useCallback(() => {
+    if (!isHost && room?.id) {
+      socket.emit('request_sync', { roomId: room.id, clientSendTime: Date.now() });
+    }
+  }, [isHost, room?.id, socket]);
+
   const {
     loadVideo,
     play,
@@ -84,12 +90,13 @@ export function Player() {
     getCurrentTime,
     mute: mutePlayer,
     unMute: unMutePlayer,
-  } = usePlayer('youtube-player-element', {
+  } = usePlayer(playerContainerRef, {
     onEnded: () => {
       if (!isHost) return;
       socket.emit(SOCKET_EVENTS.NEXT_TRACK, { roomId: room?.id });
     },
     onError: handlePlayerError,
+    onReady: handlePlayerReady,
   });
 
   const { colors } = useThemeColors(getThumbnailUrl(currentTrack) || null);
@@ -108,6 +115,20 @@ export function Player() {
     };
   }, [unMutePlayer]);
 
+  // Periodic host progress heartbeat (emitted every 2.5s to keep server position authoritative)
+  useEffect(() => {
+    if (!isHost || playbackState !== 'playing' || !room?.id) return;
+
+    const interval = setInterval(() => {
+      const activeTime = getCurrentTime() || currentTime;
+      if (activeTime > 0) {
+        socket.emit('host_progress', { roomId: room.id, position: activeTime });
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [isHost, playbackState, room?.id, socket, getCurrentTime, currentTime]);
+
   // Determine active video ID: in Video Mode prefer official music/lyric video
   const musicVideoId = currentTrack?.musicVideoId || (currentTrack as any)?.music_video_id || null;
   const audioVideoId = currentTrack?.videoId || (currentTrack as any)?.video_id || null;
@@ -123,7 +144,7 @@ export function Player() {
       loadVideo(targetVideoId, currentTime || 0);
       play();
     }
-  }, [targetVideoId, isVideoMode, isReady, loadVideo, play, currentTime]);
+  }, [targetVideoId, isVideoMode, isReady, loadVideo, play]);
 
   // Synchronize with socket events
   useEffect(() => {
@@ -187,18 +208,31 @@ export function Player() {
       playbackState: string;
       currentTrack: QueueItem | null;
       isVideoMode: boolean;
+      clientSendTime?: number;
     }) {
       if (data.currentTrack) {
         useQueueStore.getState().setCurrentTrack(data.currentTrack);
         if (data.currentTrack.duration) setDuration(data.currentTrack.duration);
       }
+
+      const rttSec = data.clientSendTime ? Math.max(0, (Date.now() - data.clientSendTime) / 2000) : 0;
+      const targetPos = data.playbackPosition + (data.playbackState === 'playing' ? rttSec : 0);
       const localTime = getCurrentTime();
-      const drift = Math.abs(localTime - data.playbackPosition);
+      const drift = Math.abs(localTime - targetPos);
 
-      if (drift > 2) seekTo(data.playbackPosition);
+      if (drift > 2) {
+        seekTo(targetPos);
+        setCurrentTime(targetPos);
+      } else {
+        setCurrentTime(targetPos);
+      }
 
-      setCurrentTime(data.playbackPosition);
       setPlaybackState(data.playbackState as 'playing' | 'paused' | 'stopped' | 'buffering');
+      if (data.playbackState === 'playing') {
+        play();
+      } else if (data.playbackState === 'paused') {
+        pause();
+      }
 
       if (data.isVideoMode !== undefined) {
         setIsVideoMode(data.isVideoMode);
@@ -390,7 +424,7 @@ export function Player() {
           <div className="flex items-center rounded-full bg-[#1e1e1e] p-1 border border-white/10 shadow-lg">
             <button
               onClick={() => handleToggleVideoMode(false)}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
                 !isVideoMode
                   ? 'bg-white text-black shadow-md'
                   : 'text-white/70 hover:text-white'
@@ -440,16 +474,11 @@ export function Player() {
                 boxShadow: `0 0 38px var(--player-glow), 0 0 80px rgba(0,0,0,0.8)`,
               }}
             >
-              {/* YouTube IFrame Player Container (Always mounted in DOM to prevent API disposal) */}
+              {/* YouTube IFrame Player Container (Unmanaged ref node so React reconciler never destroys it) */}
               <div
-                className={`absolute inset-0 w-full h-full transition-all duration-300 ${
-                  currentTrack && isVideoMode
-                    ? 'opacity-100 z-20 pointer-events-auto'
-                    : 'opacity-0 pointer-events-none -z-10'
-                }`}
-              >
-                <div id="youtube-player-element" className="w-full h-full" />
-              </div>
+                ref={playerContainerRef}
+                className="absolute inset-0 w-full h-full z-10 pointer-events-auto"
+              />
 
               {/* Waiting for Selection State (When queue is completely empty) */}
               {!currentTrack && (
@@ -469,59 +498,65 @@ export function Player() {
                 </div>
               )}
 
-              {/* YouTube Music Song Mode: High-Res Square Album Art View */}
-              {currentTrack && !isVideoMode && (
-                <div
-                  className="absolute inset-0 z-10 flex flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-[#181818]/60 via-[#121212]/90 to-[#0a0a0a] cursor-pointer"
-                  onClick={() => handleToggleVideoMode(true)}
-                  title="Click to switch to Video Mode"
-                >
-                  {/* Subtle Blurred Background Glow */}
-                  <img
-                    src={thumbnailUrl}
-                    alt={currentTrack.title}
-                    className="absolute inset-0 h-full w-full object-cover opacity-20 blur-xl scale-110"
-                  />
+              {/* YouTube Music Song Mode: High-Res Square Album Art View Overlay */}
+              <AnimatePresence>
+                {currentTrack && !isVideoMode && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.25 }}
+                    className="absolute inset-0 z-20 flex flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-[#181818]/90 via-[#121212]/95 to-[#0a0a0a] cursor-pointer"
+                    onClick={() => handleToggleVideoMode(true)}
+                    title="Click to switch to Video Mode"
+                  >
+                    {/* Subtle Blurred Background Glow */}
+                    <img
+                      src={thumbnailUrl}
+                      alt={currentTrack.title}
+                      className="absolute inset-0 h-full w-full object-cover opacity-20 blur-xl scale-110"
+                    />
 
-                  {/* Centered Square Artwork (YouTube Music Native Look) */}
-                  <div className="relative z-10 flex flex-col items-center">
-                    <motion.div
-                      initial={{ scale: 0.95, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ duration: 0.3 }}
-                      className="relative h-44 w-44 sm:h-56 sm:w-56 md:h-64 md:w-64 overflow-hidden rounded-2xl shadow-2xl border border-white/10 ring-1 ring-white/10 group"
-                    >
-                      <img
-                        src={thumbnailUrl}
-                        alt={currentTrack.title}
-                        className="h-full w-full object-cover"
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-600 text-white text-xs font-bold shadow-lg">
-                          <Film className="h-3.5 w-3.5" /> Watch Video
-                        </span>
+                    {/* Centered Square Artwork (YouTube Music Native Look) */}
+                    <div className="relative z-10 flex flex-col items-center">
+                      <motion.div
+                        initial={{ scale: 0.95, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ duration: 0.3 }}
+                        className="relative h-44 w-44 sm:h-56 sm:w-56 md:h-64 md:w-64 overflow-hidden rounded-2xl shadow-2xl border border-white/10 ring-1 ring-white/10 group"
+                      >
+                        <img
+                          src={thumbnailUrl}
+                          alt={currentTrack.title}
+                          className="h-full w-full object-cover"
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-600 text-white text-xs font-bold shadow-lg">
+                            <Film className="h-3.5 w-3.5" /> Watch Video
+                          </span>
+                        </div>
+                      </motion.div>
+
+                      <div className="mt-3 text-center px-4 max-w-sm">
+                        <h4 className="font-heading truncate text-base font-bold text-white">
+                          {currentTrack.title}
+                        </h4>
+                        <p className="font-body truncate text-xs text-white/60">
+                          {currentTrack.artist}
+                        </p>
                       </div>
-                    </motion.div>
-
-                    <div className="mt-3 text-center px-4 max-w-sm">
-                      <h4 className="font-heading truncate text-base font-bold text-white">
-                        {currentTrack.title}
-                      </h4>
-                      <p className="font-body truncate text-xs text-white/60">
-                        {currentTrack.artist}
-                      </p>
                     </div>
-                  </div>
 
-                  {/* Mode Badge */}
-                  <div className="absolute bottom-3 left-4 z-20 flex items-center gap-1.5 rounded-full border border-jukebox-gold/30 bg-black/70 px-3 py-1 backdrop-blur-md">
-                    <Music className="h-3.5 w-3.5 text-jukebox-gold" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-jukebox-gold">
-                      Song Mode (YouTube Music)
-                    </span>
-                  </div>
-                </div>
-              )}
+                    {/* Mode Badge */}
+                    <div className="absolute bottom-3 left-4 z-20 flex items-center gap-1.5 rounded-full border border-jukebox-gold/30 bg-black/70 px-3 py-1 backdrop-blur-md">
+                      <Music className="h-3.5 w-3.5 text-jukebox-gold" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-jukebox-gold">
+                        Song Mode (YouTube Music)
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 

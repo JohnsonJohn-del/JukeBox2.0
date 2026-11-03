@@ -98,12 +98,17 @@ export function registerRoomHandlers(
         return
       }
 
-      const member = roomData.members.find((m) => m.user_id === userId)
+      let member = roomData.members.find((m) => m.user_id === userId)
       if (!member) {
-        socket.emit('error', { message: 'Not a member of this room', code: 'NOT_MEMBER' })
-        return
+        try {
+          const { member: newMem } = await roomService.joinRoom(roomData.room.room_code, userId, 'Guest')
+          member = newMem
+        } catch {
+          // If auto-join failed, proceed with roomData
+        }
       }
 
+      if (!member) return;
       const wasHost = member.is_host
 
       await roomService.leaveRoom(roomId, userId)
@@ -148,10 +153,14 @@ export function registerRoomHandlers(
         return
       }
 
-      const member = roomData.members.find((m) => m.user_id === userId)
+      let member = roomData.members.find((m) => m.user_id === userId)
       if (!member) {
-        socket.emit('error', { message: 'Not a member of this room', code: 'NOT_MEMBER' })
-        return
+        try {
+          const { member: newMem } = await roomService.joinRoom(roomData.room.room_code, userId, 'Guest')
+          member = newMem
+        } catch {
+          // If auto-join failed, proceed with roomData
+        }
       }
 
       socket.join(roomId)
