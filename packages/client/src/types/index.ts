@@ -27,6 +27,7 @@ export interface RoomMember {
 
 export interface QueueItem {
   id: string;
+  roomId?: string;
   videoId: string;
   musicVideoId?: string | null;
   hasVideo?: boolean;
@@ -37,9 +38,10 @@ export interface QueueItem {
   position: number;
   addedBy: string;
   addedAt: string;
+  isPlayed?: boolean;
 }
 
-export type PlaybackState = 'playing' | 'paused' | 'stopped';
+export type PlaybackState = 'playing' | 'paused' | 'stopped' | 'buffering';
 
 export interface PlayerState {
   state: PlaybackState;

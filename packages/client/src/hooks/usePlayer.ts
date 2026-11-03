@@ -5,14 +5,6 @@ import { usePlayerStore } from '@/store/playerStore';
 
 let youtubeAPILoadPromise: Promise<void> | null = null;
 
-interface CachedPlayer {
-  player: YT.Player | null;
-  ready: boolean;
-  refCount: number;
-}
-
-const playerCache = new Map<string, CachedPlayer>();
-
 declare global {
   interface Window {
     onYouTubeIframeAPIReady?: () => void;
@@ -60,22 +52,8 @@ function loadYouTubeAPI(): Promise<void> {
   return youtubeAPILoadPromise;
 }
 
-function cachePlayerRef(
-  containerId: string,
-  player: YT.Player | null,
-  ready: boolean,
-): void {
-  let entry = playerCache.get(containerId);
-  if (!entry) {
-    entry = { player: null, ready: false, refCount: 0 };
-    playerCache.set(containerId, entry);
-  }
-  if (player !== null) entry.player = player;
-  if (ready) entry.ready = true;
-}
-
 export function usePlayer(
-  containerId: string = 'youtube-player',
+  containerId: string = 'youtube-player-element',
   options?: {
     onEnded?: () => void;
     onError?: (errorCode: number) => void;
@@ -83,6 +61,7 @@ export function usePlayer(
 ) {
   const playerRef = useRef<YT.Player | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pendingVideoRef = useRef<{ videoId: string; startSeconds: number; autoPlay?: boolean } | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -92,18 +71,11 @@ export function usePlayer(
     setCurrentTime,
     setDuration,
     setPlaybackState,
-    reset,
+    setPlayerControls,
   } = usePlayerStore();
 
   useEffect(() => {
     let mounted = true;
-    let cached = playerCache.get(containerId);
-
-    if (!cached) {
-      cached = { player: null, ready: false, refCount: 0 };
-      playerCache.set(containerId, cached);
-    }
-    cached.refCount += 1;
 
     async function initializePlayer() {
       try {
@@ -111,37 +83,29 @@ export function usePlayer(
 
         if (!mounted) return;
 
-        const entry = playerCache.get(containerId);
-
-        if (entry?.player && typeof entry.player.playVideo === 'function') {
-          playerRef.current = entry.player;
-          if (entry.ready) setIsReady(true);
-          startSyncInterval(entry.player);
+        // If player already exists on window and is healthy
+        if (window.ytPlayer && typeof window.ytPlayer.playVideo === 'function') {
+          playerRef.current = window.ytPlayer;
+          setIsReady(true);
+          startSyncInterval(window.ytPlayer);
+          if (pendingVideoRef.current) {
+            loadPendingVideo(window.ytPlayer);
+          }
           return;
         }
 
-        let container = document.getElementById(containerId);
-
+        const container = document.getElementById(containerId);
         if (!container) {
-          container = document.createElement('div');
-          container.id = containerId;
-          container.style.position = 'absolute';
-          container.style.left = '-9999px';
-          container.style.width = '1px';
-          container.style.height = '1px';
-          document.body.appendChild(container);
+          console.warn('[usePlayer] Element not found:', containerId);
+          return;
         }
-
-        const cachedEntry = playerCache.get(containerId) || cached!;
-        cachedEntry.player = null;
-        cachedEntry.ready = false;
 
         const player = new window.YT.Player(containerId, {
           height: '100%',
           width: '100%',
           playerVars: {
-            autoplay: 0,
-            controls: 0,
+            autoplay: 1,
+            controls: 1,
             modestbranding: 1,
             rel: 0,
             playsinline: 1,
@@ -154,11 +118,14 @@ export function usePlayer(
 
               playerRef.current = event.target;
               window.ytPlayer = event.target;
-              cachePlayerRef(containerId, event.target, true);
               setIsReady(true);
 
               console.log('[YouTube] Player ready on container:', containerId);
               startSyncInterval(event.target);
+
+              if (pendingVideoRef.current) {
+                loadPendingVideo(event.target);
+              }
             },
 
             onStateChange: (event) => {
@@ -182,10 +149,6 @@ export function usePlayer(
                   optionsRef.current?.onEnded?.();
                   break;
 
-                case window.YT.PlayerState.CUED:
-                  setPlaybackState('stopped');
-                  break;
-
                 default:
                   break;
               }
@@ -198,9 +161,29 @@ export function usePlayer(
             },
           },
         });
-        cachedEntry.player = player;
+
+        playerRef.current = player;
+        window.ytPlayer = player;
       } catch (err) {
         console.error('[usePlayer] Initialization failed:', err);
+      }
+    }
+
+    function loadPendingVideo(p: YT.Player) {
+      if (!pendingVideoRef.current) return;
+      const { videoId, startSeconds, autoPlay } = pendingVideoRef.current;
+      pendingVideoRef.current = null;
+
+      try {
+        p.loadVideoById({
+          videoId,
+          startSeconds: Math.floor(startSeconds),
+        });
+        if (autoPlay) {
+          p.playVideo();
+        }
+      } catch (err) {
+        console.error('[usePlayer] Error loading pending video:', err);
       }
     }
 
@@ -208,25 +191,37 @@ export function usePlayer(
       if (intervalRef.current) clearInterval(intervalRef.current);
 
       intervalRef.current = setInterval(() => {
-        const p = playerRef.current || target;
-        if (!p) return;
+        const p = playerRef.current || target || window.ytPlayer;
+        let readFromPlayer = false;
 
-        try {
-          if (typeof p.getCurrentTime === 'function') {
-            const time = p.getCurrentTime();
-            if (typeof time === 'number' && !isNaN(time)) {
-              setCurrentTime(time);
+        if (p) {
+          try {
+            if (typeof p.getCurrentTime === 'function') {
+              const time = p.getCurrentTime();
+              if (typeof time === 'number' && !isNaN(time) && time > 0) {
+                setCurrentTime(time);
+                readFromPlayer = true;
+              }
             }
-          }
 
-          if (typeof p.getDuration === 'function') {
-            const dur = p.getDuration();
-            if (typeof dur === 'number' && !isNaN(dur) && dur > 0) {
-              setDuration(dur);
+            if (typeof p.getDuration === 'function') {
+              const dur = p.getDuration();
+              if (typeof dur === 'number' && !isNaN(dur) && dur > 0) {
+                setDuration(dur);
+              }
             }
+          } catch {
+            // ignore during video transitions
           }
-        } catch {
-          // ignore interval reading hiccups during video transition
+        }
+
+        // Active room timer fallback: If room playbackState is 'playing', smoothly advance seconds
+        if (!readFromPlayer && usePlayerStore.getState().playbackState === 'playing') {
+          const current = usePlayerStore.getState().currentTime;
+          const maxDur = usePlayerStore.getState().duration;
+          if (maxDur > 0 && current < maxDur) {
+            setCurrentTime(current + 1);
+          }
         }
       }, 1000);
     }
@@ -235,62 +230,34 @@ export function usePlayer(
 
     return () => {
       mounted = false;
-
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
-
-      const entry = playerCache.get(containerId);
-      if (entry) {
-        entry.refCount -= 1;
-
-        if (entry.refCount <= 0) {
-          playerCache.delete(containerId);
-
-          if (entry.player) {
-            try {
-              entry.player.destroy();
-            } catch (err) {
-              console.error('[YouTube] Destroy error:', err);
-            }
-          }
-        }
-      }
-
-      playerRef.current = null;
-      setIsReady(false);
     };
-  }, [containerId, reset, setCurrentTime, setDuration, setPlaybackState]);
+  }, [containerId, setCurrentTime, setDuration, setPlaybackState]);
 
   const loadVideo = useCallback((videoId: string, startSeconds: number = 0) => {
     try {
-      if (playerRef.current && typeof playerRef.current.loadVideoById === 'function') {
-        playerRef.current.loadVideoById({
+      const p = playerRef.current || window.ytPlayer;
+      if (p && typeof p.loadVideoById === 'function') {
+        p.loadVideoById({
           videoId,
           startSeconds: Math.floor(startSeconds),
         });
+      } else {
+        pendingVideoRef.current = { videoId, startSeconds, autoPlay: true };
       }
     } catch (err) {
       console.error('[YouTube] loadVideo error:', err);
-    }
-  }, []);
-
-  const cueVideo = useCallback((videoId: string, startSeconds: number = 0) => {
-    try {
-      if (playerRef.current && typeof playerRef.current.cueVideoById === 'function') {
-        playerRef.current.cueVideoById({
-          videoId,
-          startSeconds: Math.floor(startSeconds),
-        });
-      }
-    } catch (err) {
-      console.error('[YouTube] cueVideo error:', err);
+      pendingVideoRef.current = { videoId, startSeconds, autoPlay: true };
     }
   }, []);
 
   const play = useCallback(() => {
     try {
-      playerRef.current?.playVideo();
+      const p = playerRef.current || window.ytPlayer;
+      p?.unMute?.();
+      p?.playVideo?.();
     } catch (err) {
       console.error('[YouTube] play error:', err);
     }
@@ -298,7 +265,8 @@ export function usePlayer(
 
   const pause = useCallback(() => {
     try {
-      playerRef.current?.pauseVideo();
+      const p = playerRef.current || window.ytPlayer;
+      p?.pauseVideo?.();
     } catch (err) {
       console.error('[YouTube] pause error:', err);
     }
@@ -306,7 +274,8 @@ export function usePlayer(
 
   const seekTo = useCallback((seconds: number) => {
     try {
-      playerRef.current?.seekTo(seconds, true);
+      const p = playerRef.current || window.ytPlayer;
+      p?.seekTo?.(seconds, true);
     } catch (err) {
       console.error('[YouTube] seek error:', err);
     }
@@ -314,7 +283,8 @@ export function usePlayer(
 
   const mute = useCallback(() => {
     try {
-      playerRef.current?.mute();
+      const p = playerRef.current || window.ytPlayer;
+      p?.mute?.();
     } catch (err) {
       console.error('[YouTube] mute error:', err);
     }
@@ -322,39 +292,45 @@ export function usePlayer(
 
   const unMute = useCallback(() => {
     try {
-      playerRef.current?.unMute();
+      const p = playerRef.current || window.ytPlayer;
+      p?.unMute?.();
     } catch (err) {
       console.error('[YouTube] unmute error:', err);
     }
   }, []);
 
-  const getCurrentTime = useCallback(() => {
+  const getCurrentTime = useCallback((): number => {
     try {
-      return playerRef.current?.getCurrentTime?.() || 0;
+      const p = playerRef.current || window.ytPlayer;
+      if (p && typeof p.getCurrentTime === 'function') {
+        return p.getCurrentTime() || 0;
+      }
     } catch {
-      return 0;
+      // ignore
     }
+    return usePlayerStore.getState().currentTime;
   }, []);
 
-  const getDuration = useCallback(() => {
-    try {
-      return playerRef.current?.getDuration?.() || 0;
-    } catch {
-      return 0;
-    }
-  }, []);
+  // Register controls to store so FooterPlayerControls can reuse without double initialization
+  useEffect(() => {
+    setPlayerControls({
+      play,
+      pause,
+      seekTo,
+      mute,
+      unMute,
+      loadVideo,
+    });
+  }, [play, pause, seekTo, mute, unMute, loadVideo, setPlayerControls]);
 
   return {
-    playerRef,
-    isReady,
     loadVideo,
-    cueVideo,
     play,
     pause,
     seekTo,
+    isReady,
+    getCurrentTime,
     mute,
     unMute,
-    getCurrentTime,
-    getDuration,
   };
 }

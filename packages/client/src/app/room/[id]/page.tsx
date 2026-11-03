@@ -94,7 +94,7 @@ export default function RoomPage() {
           member.user_id === user?.id
         );
 
-        setIsHost(Boolean((myMember as any)?.isHost || (myMember as any)?.is_host));
+        const isRoomHost = Boolean((myMember as any)?.isHost || (myMember as any)?.is_host || (data.room as any)?.hostId === user?.id || (data.room as any)?.host_id === user?.id); setIsHost(isRoomHost);
         setPageState('ready');
       } catch (err) {
         if (cancelled) return;
@@ -165,7 +165,7 @@ export default function RoomPage() {
           member.user_id === user?.id
         );
 
-        setIsHost(Boolean((myMember as any)?.isHost || (myMember as any)?.is_host));
+        const isRoomHost = Boolean((myMember as any)?.isHost || (myMember as any)?.is_host || (data.room as any)?.hostId === user?.id || (data.room as any)?.host_id === user?.id); setIsHost(isRoomHost);
         setPageState('ready');
       })
       .catch((err) => {

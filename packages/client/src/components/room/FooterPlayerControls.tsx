@@ -5,7 +5,6 @@ import { motion } from 'framer-motion';
 import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Video, Tv, Film } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useSocket } from '@/hooks/useSocket';
-import { usePlayer } from '@/hooks/usePlayer';
 import { usePlayerStore } from '@/store/playerStore';
 import { useQueueStore } from '@/store/queueStore';
 import { useRoomStore } from '@/store/roomStore';
@@ -34,39 +33,40 @@ export function FooterPlayerControls() {
     currentTime,
     duration,
     isVideoMode,
+    playerControls,
     setCurrentTime,
     setIsVideoMode,
+    setPlaybackState,
   } = usePlayerStore();
-
-  const {
-    play,
-    pause,
-    seekTo,
-    mute: mutePlayer,
-    unMute: unMutePlayer,
-  } = usePlayer('youtube-player-element');
 
   const isPlaying = playbackState === 'playing';
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
-  const trackHasVideoCounterpart = Boolean(currentTrack?.hasVideo && currentTrack?.musicVideoId);
+  const trackHasVideoCounterpart = Boolean(currentTrack?.hasVideo || currentTrack?.musicVideoId);
 
   const handlePlayPause = useCallback(() => {
     if (!currentTrack) return;
 
     if (isPlaying) {
-      pause();
-      socket.emit(SOCKET_EVENTS.PAUSE, {
-        roomId: room?.id,
-        position: currentTime,
-      });
+      playerControls?.pause();
+      setPlaybackState('paused');
+      if (isHost && room?.id) {
+        socket.emit(SOCKET_EVENTS.PAUSE, {
+          roomId: room.id,
+          position: currentTime,
+        });
+      }
     } else {
-      play();
-      socket.emit(SOCKET_EVENTS.PLAY, {
-        roomId: room?.id,
-        position: currentTime,
-      });
+      playerControls?.unMute();
+      playerControls?.play();
+      setPlaybackState('playing');
+      if (isHost && room?.id) {
+        socket.emit(SOCKET_EVENTS.PLAY, {
+          roomId: room.id,
+          position: currentTime,
+        });
+      }
     }
-  }, [currentTrack, isPlaying, pause, play, socket, room?.id, currentTime]);
+  }, [currentTrack, isPlaying, playerControls, socket, room?.id, currentTime, isHost, setPlaybackState]);
 
   const handlePrevious = useCallback(() => {
     if (!isHost) {
@@ -92,11 +92,6 @@ export function FooterPlayerControls() {
       return;
     }
 
-    if (!isVideoMode && !trackHasVideoCounterpart) {
-      toast.error('Official music video counterpart is not available on YouTube Music for this track.');
-      return;
-    }
-
     const nextMode = !isVideoMode;
     setIsVideoMode(nextMode);
     setVideoMode(nextMode);
@@ -106,7 +101,7 @@ export function FooterPlayerControls() {
       isVideoMode: nextMode,
       position: currentTime,
     });
-  }, [currentTrack, isHost, isVideoMode, trackHasVideoCounterpart, setIsVideoMode, setVideoMode, socket, room?.id, currentTime]);
+  }, [currentTrack, isHost, isVideoMode, setIsVideoMode, setVideoMode, socket, room?.id, currentTime]);
 
   const handleSeek = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -116,7 +111,7 @@ export function FooterPlayerControls() {
       const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       const time = fraction * duration;
 
-      seekTo(time);
+      playerControls?.seekTo(time);
       setCurrentTime(time);
 
       socket.emit(SOCKET_EVENTS.SEEK, {
@@ -124,19 +119,19 @@ export function FooterPlayerControls() {
         position: time,
       });
     },
-    [isHost, duration, seekTo, setCurrentTime, socket, room?.id],
+    [isHost, duration, playerControls, setCurrentTime, socket, room?.id],
   );
 
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
       const next = !prev;
 
-      if (next) mutePlayer();
-      else unMutePlayer();
+      if (next) playerControls?.mute();
+      else playerControls?.unMute();
 
       return next;
     });
-  }, [mutePlayer, unMutePlayer]);
+  }, [playerControls]);
 
   if (!currentTrack) {
     return (
@@ -235,21 +230,12 @@ export function FooterPlayerControls() {
               </button>
               <button
                 onClick={() => !isVideoMode && handleToggleVideoMode()}
-                disabled={!trackHasVideoCounterpart && !isVideoMode}
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
                   isVideoMode
                     ? 'bg-red-600 text-white shadow-sm font-black'
-                    : trackHasVideoCounterpart
-                    ? 'text-white/60 hover:text-white cursor-pointer'
-                    : 'text-white/20 cursor-not-allowed opacity-40'
+                    : 'text-white/60 hover:text-white cursor-pointer'
                 }`}
-                title={
-                  !trackHasVideoCounterpart
-                    ? 'No official video counterpart available on YouTube Music'
-                    : !isHost
-                    ? 'Only host can toggle video mode'
-                    : 'Switch to Video Mode'
-                }
+                title={!isHost ? 'Only host can toggle video mode' : 'Switch to Video Mode'}
               >
                 Video
               </button>

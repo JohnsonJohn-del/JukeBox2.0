@@ -61,7 +61,7 @@ export function Player() {
     console.warn('[Player] YouTube error received:', errorCode);
     // Error 101 or 150 = embedding restricted by owner
     if (errorCode === 101 || errorCode === 150) {
-      toast.error('Music video embedding restricted by copyright holder. Switching back to Audio Mode.', {
+      toast.error('Embedded playback restricted by copyright owner. Trying audio stream...', {
         duration: 4000,
         icon: '⚠️',
       });
@@ -71,16 +71,9 @@ export function Player() {
         currentActiveVideoIdRef.current = currentTrack.videoId;
         loadVideo(currentTrack.videoId, currentTime);
         play();
-        if (isHost && room?.id) {
-          socket.emit(SOCKET_EVENTS.TOGGLE_VIDEO_MODE, {
-            roomId: room.id,
-            isVideoMode: false,
-            position: currentTime,
-          });
-        }
       }
     }
-  }, [currentTrack, currentTime, isHost, room?.id, socket, setIsVideoMode, setVideoMode]);
+  }, [currentTrack, currentTime, setIsVideoMode, setVideoMode]);
 
   const {
     loadVideo,
@@ -101,25 +94,24 @@ export function Player() {
 
   const { colors } = useThemeColors(getThumbnailUrl(currentTrack) || null);
 
-  // Switch video source when track or video mode changes
-  const syncTrackVideoSource = useCallback((track: QueueItem | null, videoMode: boolean, startTime: number = 0) => {
-    if (!track) return;
+  // Determine active video ID: in Video Mode prefer official music/lyric video
+  const musicVideoId = currentTrack?.musicVideoId || (currentTrack as any)?.music_video_id || null;
+  const audioVideoId = currentTrack?.videoId || (currentTrack as any)?.video_id || null;
+  const hasOfficialVideo = Boolean(musicVideoId && musicVideoId !== audioVideoId);
+  const targetVideoId = isVideoMode && musicVideoId ? musicVideoId : (musicVideoId || audioVideoId);
 
-    const audioId = (track as any).videoId || (track as any).video_id;
-    const musicVideoId = track.musicVideoId || null;
-    const hasVideo = Boolean(track.hasVideo && musicVideoId);
-
-    // If in video mode and counterpart exists, use music video; else use audio track
-    const targetVideoId = videoMode && hasVideo ? musicVideoId! : audioId;
-
+  // Automatically load and start track when track or video mode changes
+  useEffect(() => {
     if (!targetVideoId) return;
 
     if (currentActiveVideoIdRef.current !== targetVideoId) {
       currentActiveVideoIdRef.current = targetVideoId;
-      loadVideo(targetVideoId, startTime);
-      play();
+      loadVideo(targetVideoId, currentTime || 0);
+      if (playbackState === 'playing') {
+        play();
+      }
     }
-  }, [loadVideo, play]);
+  }, [targetVideoId, isVideoMode, isReady, loadVideo, play, currentTime, playbackState]);
 
   // Synchronize with socket events
   useEffect(() => {
@@ -151,22 +143,20 @@ export function Player() {
       const track = data.track;
       if (track.duration) setDuration(track.duration);
 
-      const targetId = isVideoMode && track.hasVideo && track.musicVideoId
-        ? track.musicVideoId
-        : ((track as any).videoId || (track as any).video_id);
+      const mId = track.musicVideoId || (track as any).music_video_id;
+      const vId = track.videoId || (track as any).video_id;
+      const nextTarget = isVideoMode && mId ? mId : (mId || vId);
 
-      currentActiveVideoIdRef.current = targetId;
-      loadVideo(targetId, 0);
-      play();
+      if (nextTarget) {
+        currentActiveVideoIdRef.current = nextTarget;
+        loadVideo(nextTarget, 0);
+        play();
+      }
     }
 
     function onVideoModeChanged(data: VideoModeChangedPayload) {
       setIsVideoMode(data.isVideoMode);
       setVideoMode(data.isVideoMode);
-
-      if (currentTrack) {
-        syncTrackVideoSource(currentTrack, data.isVideoMode, data.position || currentTime);
-      }
 
       toast(data.isVideoMode ? 'Host switched to Video Mode 🎬' : 'Host switched to Audio Mode 🎵', {
         icon: data.isVideoMode ? '🎬' : '🎵',
@@ -191,10 +181,6 @@ export function Player() {
       if (data.isVideoMode !== undefined) {
         setIsVideoMode(data.isVideoMode);
         setVideoMode(data.isVideoMode);
-      }
-
-      if (data.currentTrack) {
-        syncTrackVideoSource(data.currentTrack, data.isVideoMode, data.playbackPosition);
       }
     }
 
@@ -224,31 +210,22 @@ export function Player() {
     pause,
     getCurrentTime,
     isVideoMode,
-    currentTrack,
-    currentTime,
-    syncTrackVideoSource,
   ]);
 
   const handleEnablePlayback = useCallback(() => {
     setUserInteracted(true);
     unMutePlayer();
 
-    if (currentTrack) {
-      const targetId = isVideoMode && currentTrack.hasVideo && currentTrack.musicVideoId
-        ? currentTrack.musicVideoId
-        : ((currentTrack as any).videoId || (currentTrack as any).video_id);
-
-      if (targetId) {
-        currentActiveVideoIdRef.current = targetId;
-        loadVideo(targetId, currentTime);
-        play();
-      }
+    if (targetVideoId) {
+      currentActiveVideoIdRef.current = targetVideoId;
+      loadVideo(targetVideoId, currentTime || 0);
+      play();
     }
 
     if (isHost && room?.id) {
       socket.emit(SOCKET_EVENTS.PLAY, { roomId: room.id, position: currentTime || 0 });
     }
-  }, [currentTrack, isVideoMode, loadVideo, play, currentTime, unMutePlayer, isHost, room?.id, socket]);
+  }, [targetVideoId, loadVideo, play, currentTime, unMutePlayer, isHost, room?.id, socket]);
 
   const handlePlayPause = useCallback(() => {
     if (!userInteracted) {
@@ -258,45 +235,45 @@ export function Player() {
 
     if (playbackState === 'playing') {
       pause();
-      socket.emit(SOCKET_EVENTS.PAUSE, { roomId: room?.id, position: currentTime });
+      setPlaybackState('paused');
+      if (isHost && room?.id) {
+        socket.emit(SOCKET_EVENTS.PAUSE, { roomId: room.id, position: currentTime });
+      }
     } else {
       unMutePlayer();
       play();
-      socket.emit(SOCKET_EVENTS.PLAY, { roomId: room?.id, position: currentTime });
+      setPlaybackState('playing');
+      if (isHost && room?.id) {
+        socket.emit(SOCKET_EVENTS.PLAY, { roomId: room.id, position: currentTime });
+      }
     }
-  }, [playbackState, pause, play, socket, room?.id, currentTime, userInteracted, handleEnablePlayback, unMutePlayer]);
+  }, [playbackState, pause, play, socket, room?.id, currentTime, userInteracted, handleEnablePlayback, unMutePlayer, isHost, setPlaybackState]);
 
-  const handleToggleVideoMode = useCallback(() => {
+  const handleToggleVideoMode = useCallback((desiredMode?: boolean) => {
     if (!currentTrack) return;
 
-    if (!isHost) {
-      toast('Only the room host can switch between Audio and Video mode', {
-        icon: '🔒',
-      });
-      return;
-    }
-
-    const hasVideo = Boolean(currentTrack.hasVideo && currentTrack.musicVideoId);
-
-    if (!isVideoMode && !hasVideo) {
-      toast.error('Official music video counterpart is not available on YouTube Music for this track.', {
-        duration: 3500,
-      });
-      return;
-    }
-
-    const nextMode = !isVideoMode;
+    const nextMode = desiredMode !== undefined ? desiredMode : !isVideoMode;
     setIsVideoMode(nextMode);
     setVideoMode(nextMode);
 
-    syncTrackVideoSource(currentTrack, nextMode, currentTime);
+    const mId = currentTrack.musicVideoId || (currentTrack as any).music_video_id;
+    const vId = currentTrack.videoId || (currentTrack as any).video_id;
+    const newTarget = nextMode && mId ? mId : (mId || vId);
 
-    socket.emit(SOCKET_EVENTS.TOGGLE_VIDEO_MODE, {
-      roomId: room?.id,
-      isVideoMode: nextMode,
-      position: currentTime,
-    });
-  }, [currentTrack, isHost, isVideoMode, currentTime, setIsVideoMode, setVideoMode, syncTrackVideoSource, socket, room?.id]);
+    if (newTarget && currentActiveVideoIdRef.current !== newTarget) {
+      currentActiveVideoIdRef.current = newTarget;
+      loadVideo(newTarget, currentTime || 0);
+      play();
+    }
+
+    if (isHost && room?.id) {
+      socket.emit(SOCKET_EVENTS.TOGGLE_VIDEO_MODE, {
+        roomId: room.id,
+        isVideoMode: nextMode,
+        position: currentTime,
+      });
+    }
+  }, [currentTrack, isHost, isVideoMode, currentTime, setIsVideoMode, setVideoMode, loadVideo, play, socket, room?.id]);
 
   const handleSeek = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -348,7 +325,6 @@ export function Player() {
   const isPlaying = playbackState === 'playing';
   const accentColor = colors.primary || '#d6a84f';
   const thumbnailUrl = getThumbnailUrl(currentTrack);
-  const trackHasVideoCounterpart = Boolean(currentTrack?.hasVideo && currentTrack?.musicVideoId);
 
   if (!currentTrack) {
     return (
@@ -373,7 +349,7 @@ export function Player() {
           </h2>
 
           <p className="font-body mt-3 max-w-sm text-lg leading-6 text-jukebox-cream/55">
-            Search YouTube Music to queue official tracks. Seamlessly switch between Album Art and Official Music Videos!
+            Search YouTube Music to queue official tracks. Switch between Song & Video modes instantly!
           </p>
         </div>
       </motion.div>
@@ -417,11 +393,11 @@ export function Player() {
             </p>
 
             <h3 className="font-heading mt-2 text-xl font-black uppercase heading-tracking text-jukebox-cream">
-              Tap to Start Playback
+              Tap to Start Video & Audio
             </h3>
 
             <p className="font-body mt-2 text-sm leading-5 text-jukebox-cream/65">
-              Browser audio policies require one tap to unlock synchronized streaming.
+              Browser policy requires one click to begin playing synchronized streaming media.
             </p>
           </motion.div>
         </motion.div>
@@ -435,14 +411,15 @@ export function Player() {
               <Film className="h-3 w-3 text-red-500" />
               YouTube Music
             </span>
-            {trackHasVideoCounterpart ? (
+            {hasOfficialVideo ? (
               <span className="inline-flex items-center gap-1 rounded-full border border-cyan-500/30 bg-cyan-950/30 px-2.5 py-0.5 text-[10px] font-medium text-cyan-300">
                 <Sparkles className="h-3 w-3 text-cyan-400" />
-                Music Video Available
+                Official Music Video
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/20 bg-yellow-950/20 px-2.5 py-0.5 text-[10px] font-medium text-yellow-300/70">
-                Official Audio Only
+              <span className="inline-flex items-center gap-1 rounded-full border border-green-500/30 bg-green-950/30 px-2.5 py-0.5 text-[10px] font-medium text-green-300">
+                <Video className="h-3 w-3 text-green-400" />
+                Video Mode Available
               </span>
             )}
           </div>
@@ -450,7 +427,7 @@ export function Player() {
           {/* YouTube Music Native [ Song | Video ] Segmented Control */}
           <div className="flex items-center rounded-full bg-[#1e1e1e] p-1 border border-white/10 shadow-lg">
             <button
-              onClick={() => isVideoMode && handleToggleVideoMode()}
+              onClick={() => handleToggleVideoMode(false)}
               className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
                 !isVideoMode
                   ? 'bg-white text-black shadow-md'
@@ -461,22 +438,13 @@ export function Player() {
               Song
             </button>
             <button
-              onClick={() => !isVideoMode && handleToggleVideoMode()}
-              disabled={!trackHasVideoCounterpart && !isVideoMode}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+              onClick={() => handleToggleVideoMode(true)}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
                 isVideoMode
-                  ? 'bg-white text-black shadow-md'
-                  : trackHasVideoCounterpart
-                  ? 'text-white/70 hover:text-white cursor-pointer'
-                  : 'text-white/25 cursor-not-allowed opacity-50'
+                  ? 'bg-red-600 text-white shadow-md'
+                  : 'text-white/70 hover:text-white'
               }`}
-              title={
-                !trackHasVideoCounterpart
-                  ? 'No official video counterpart available on YouTube Music'
-                  : !isHost
-                  ? 'Only host can toggle Video Mode'
-                  : 'Switch to Official Music Video'
-              }
+              title={!isHost ? 'Only host can toggle Video Mode' : 'Switch to Video Mode'}
             >
               <Film className="h-3.5 w-3.5" />
               Video
@@ -510,10 +478,10 @@ export function Player() {
                 boxShadow: `0 0 38px var(--player-glow), 0 0 80px rgba(0,0,0,0.8)`,
               }}
             >
-              {/* YouTube IFrame Player Container (Visible in Video Mode) */}
+              {/* YouTube IFrame Player Container (Active in both modes for audio, visible in Video Mode) */}
               <div
-                className={`w-full h-full transition-opacity duration-300 ${
-                  isVideoMode ? 'opacity-100 z-20 relative' : 'opacity-0 pointer-events-none absolute inset-0 -z-10'
+                className={`absolute inset-0 w-full h-full transition-all duration-300 ${
+                  isVideoMode ? 'opacity-100 z-20 pointer-events-auto' : 'opacity-0 pointer-events-none -z-10'
                 }`}
               >
                 <div id="youtube-player-element" className="w-full h-full" />
@@ -521,7 +489,11 @@ export function Player() {
 
               {/* YouTube Music Song Mode: High-Res Square Album Art View */}
               {!isVideoMode && (
-                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-[#181818]/60 via-[#121212]/90 to-[#0a0a0a]">
+                <div
+                  className="absolute inset-0 z-10 flex flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-[#181818]/60 via-[#121212]/90 to-[#0a0a0a] cursor-pointer"
+                  onClick={() => handleToggleVideoMode(true)}
+                  title="Click to switch to Video Mode"
+                >
                   {/* Subtle Blurred Background Glow */}
                   <img
                     src={thumbnailUrl}
@@ -535,13 +507,18 @@ export function Player() {
                       initial={{ scale: 0.95, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
                       transition={{ duration: 0.3 }}
-                      className="relative h-44 w-44 sm:h-56 sm:w-56 md:h-64 md:w-64 overflow-hidden rounded-2xl shadow-2xl border border-white/10 ring-1 ring-white/10"
+                      className="relative h-44 w-44 sm:h-56 sm:w-56 md:h-64 md:w-64 overflow-hidden rounded-2xl shadow-2xl border border-white/10 ring-1 ring-white/10 group"
                     >
                       <img
                         src={thumbnailUrl}
                         alt={currentTrack.title}
                         className="h-full w-full object-cover"
                       />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-600 text-white text-xs font-bold shadow-lg">
+                          <Film className="h-3.5 w-3.5" /> Watch Video
+                        </span>
+                      </div>
                     </motion.div>
 
                     <div className="mt-3 text-center px-4 max-w-sm">
