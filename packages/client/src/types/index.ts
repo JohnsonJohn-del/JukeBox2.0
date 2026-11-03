@@ -79,3 +79,13 @@ export interface ThemeColors {
   background: string;
   surface: string;
 }
+
+export interface ChatMessage {
+  id: string;
+  roomId: string;
+  senderId: string;
+  senderName: string;
+  isHost: boolean;
+  message: string;
+  createdAt: string;
+}

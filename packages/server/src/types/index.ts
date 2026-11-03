@@ -67,3 +67,13 @@ export interface AuthRequest {
   userId: string
   role: 'user' | 'guest'
 }
+
+export interface ChatMessage {
+  id: string
+  room_id: string
+  sender_id: string
+  sender_name: string
+  is_host: boolean
+  message: string
+  created_at: string
+}

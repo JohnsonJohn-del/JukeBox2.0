@@ -5,6 +5,7 @@ import { config } from '../config'
 import { registerRoomHandlers } from './room.socket'
 import { registerPlaybackHandlers } from './playback.socket'
 import { registerQueueHandlers } from './queue.socket'
+import { registerChatHandlers } from './chat.socket'
 import { SocketData, ClientToServerEvents, ServerToClientEvents, InterServerEvents } from '../types/socket'
 import { getRoom, transferHost, getRoomMembers, updateSocketId } from '../services/room.service'
 
@@ -48,6 +49,7 @@ export function setupSocket(httpServer: HttpServer): Server<ClientToServerEvents
     registerRoomHandlers(io, socket)
     registerPlaybackHandlers(io, socket)
     registerQueueHandlers(io, socket)
+    registerChatHandlers(io, socket)
 
     socket.on('disconnect', async () => {
       console.log(`[Socket] User ${userId} disconnected (socket: ${socket.id})`)

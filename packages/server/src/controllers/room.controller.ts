@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import * as roomService from '../services/room.service'
+import * as chatService from '../services/chat.service'
 import { formatResponse, formatError } from '../utils/helpers'
 
 export async function createRoom(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -122,6 +123,51 @@ export async function getRoomByCode(req: Request, res: Response, next: NextFunct
       return
     }
     res.json(formatResponse({ room }))
+  } catch (error) {
+    next(error)
+  }
+}
+
+export async function getRoomMessages(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params
+    const limit = req.query.limit ? Number(req.query.limit) : 100
+    const rawMessages = await chatService.getRoomMessages(id, limit)
+    const messages = rawMessages.map((msg) => ({
+      id: msg.id,
+      roomId: msg.room_id,
+      senderId: msg.sender_id,
+      senderName: msg.sender_name,
+      isHost: msg.is_host,
+      message: msg.message,
+      createdAt: msg.created_at,
+    }))
+    res.json(formatResponse({ messages }))
+  } catch (error) {
+    next(error)
+  }
+}
+
+export async function sendRoomMessage(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json(formatError('Authentication required', 'AUTH_REQUIRED'))
+      return
+    }
+    const { id } = req.params
+    const { message } = req.body
+    const msg = await chatService.sendMessage(id, req.user.userId, message)
+    res.json(formatResponse({
+      message: {
+        id: msg.id,
+        roomId: msg.room_id,
+        senderId: msg.sender_id,
+        senderName: msg.sender_name,
+        isHost: msg.is_host,
+        message: msg.message,
+        createdAt: msg.created_at,
+      }
+    }))
   } catch (error) {
     next(error)
   }

@@ -29,6 +29,11 @@ export const SOCKET_EVENTS = {
   REMOVE_SONG: 'remove_song',
   REORDER_QUEUE: 'reorder_queue',
   QUEUE_UPDATED: 'queue_updated',
+  // Chat events
+  SEND_MESSAGE: 'send_message',
+  GET_MESSAGES: 'get_messages',
+  NEW_MESSAGE: 'new_message',
+  MESSAGES_HISTORY: 'messages_history',
   // Error
   ERROR: 'error',
 } as const;

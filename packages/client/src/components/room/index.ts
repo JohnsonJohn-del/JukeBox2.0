@@ -5,3 +5,4 @@ export { MemberList } from './MemberList';
 export { HostControls } from './HostControls';
 export { InviteButton } from './InviteButton';
 export { NowPlaying } from './NowPlaying';
+export { ChatPanel } from './ChatPanel';

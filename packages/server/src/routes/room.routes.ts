@@ -14,5 +14,7 @@ router.get('/:id', roomController.getRoom)
 router.post('/:id/leave', authenticate, roomController.leaveRoom)
 router.post('/:id/transfer', authenticate, validate(transferHostSchema), roomController.transferHost)
 router.post('/:id/end', authenticate, roomController.endRoom)
+router.get('/:id/messages', authenticate, roomController.getRoomMessages)
+router.post('/:id/messages', authenticate, roomController.sendRoomMessage)
 
 export default router

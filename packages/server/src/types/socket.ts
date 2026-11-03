@@ -127,6 +127,31 @@ export interface ErrorResponse {
   code?: string
 }
 
+
+export interface SendMessagePayload {
+  roomId: string
+  message: string
+}
+
+export interface GetMessagesPayload {
+  roomId: string
+  limit?: number
+}
+
+export interface NewMessageResponse {
+  id: string
+  roomId: string
+  senderId: string
+  senderName: string
+  isHost: boolean
+  message: string
+  createdAt: string
+}
+
+export interface MessagesHistoryResponse {
+  messages: NewMessageResponse[]
+}
+
 export interface ClientToServerEvents {
   create_room: (payload: CreateRoomPayload) => void
   join_room: (payload: JoinRoomPayload) => void
@@ -142,6 +167,8 @@ export interface ClientToServerEvents {
   remove_song: (payload: RemoveSongPayload) => void
   reorder_queue: (payload: ReorderQueuePayload) => void
   request_sync: (payload: RequestSyncPayload) => void
+  send_message: (payload: SendMessagePayload) => void
+  get_messages: (payload: GetMessagesPayload) => void
 }
 
 export interface ServerToClientEvents {
@@ -158,6 +185,8 @@ export interface ServerToClientEvents {
   sync_state: (response: SyncStateResponse) => void
   error: (response: ErrorResponse) => void
   room_closed: (response: {}) => void
+  new_message: (response: NewMessageResponse) => void
+  messages_history: (response: MessagesHistoryResponse) => void
 }
 
 export interface InterServerEvents {

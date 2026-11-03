@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback, type CSSProperties } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { LogOut, AlertCircle, Music, Wifi, WifiOff, Radio } from 'lucide-react';
+import { LogOut, AlertCircle, Music, Wifi, WifiOff, Radio, MessageSquare } from 'lucide-react';
+import { useChatStore } from '@/store/chatStore';
 import { useSocket } from '@/hooks/useSocket';
 import { useRoom } from '@/hooks/useRoom';
 import { useQueue } from '@/hooks/useQueue';
@@ -24,6 +25,7 @@ import {
   MemberList,
   HostControls,
   InviteButton,
+  ChatPanel,
 } from '@/components/room';
 import { FooterPlayerControls } from '@/components/room/FooterPlayerControls';
 import { Button } from '@/components/ui';
@@ -58,6 +60,8 @@ export default function RoomPage() {
   const [pageError, setPageError] = useState('');
   const [showMobileQueue, setShowMobileQueue] = useState(false);
   const [socketError, setSocketError] = useState<string | null>(null);
+  const [activeRightTab, setActiveRightTab] = useState<'queue' | 'chat'>('queue');
+  const unreadCount = useChatStore((s) => s.unreadCount);
 
   const { colors: themeColors } = useThemeColors(getThumbnailUrl(currentTrack));
 
@@ -398,17 +402,61 @@ export default function RoomPage() {
         </section>
 
         <aside className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-jukebox-gold/30 bg-jukebox-black/55 shadow-jukebox-panel">
-          <div className="shrink-0 border-b border-jukebox-gold/20 px-4 py-4">
+          <div className="shrink-0 border-b border-jukebox-gold/20 px-4 py-3">
             <SearchBar />
           </div>
 
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <Queue />
+          {/* Segmented Control: Queue vs Chat */}
+          <div className="shrink-0 border-b border-jukebox-gold/20 px-4 py-2 bg-black/40">
+            <div className="flex items-center gap-1 bg-black/50 p-1 rounded-xl border border-white/10 w-full">
+              <button
+                type="button"
+                onClick={() => setActiveRightTab('queue')}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer',
+                  activeRightTab === 'queue'
+                    ? 'bg-jukebox-gold text-jukebox-black shadow-md'
+                    : 'text-jukebox-cream/60 hover:text-jukebox-cream'
+                )}
+              >
+                <Music className="h-3.5 w-3.5" />
+                Queue ({queue.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveRightTab('chat')}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer relative',
+                  activeRightTab === 'chat'
+                    ? 'bg-jukebox-gold text-jukebox-black shadow-md'
+                    : 'text-jukebox-cream/60 hover:text-jukebox-cream'
+                )}
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                Chat
+                {unreadCount > 0 && activeRightTab !== 'chat' && (
+                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-black text-white ml-1">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
 
-          <div className="max-h-[220px] shrink-0 border-t border-jukebox-gold/20">
-            <MemberList />
-          </div>
+          {activeRightTab === 'queue' ? (
+            <>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <Queue />
+              </div>
+              <div className="max-h-[220px] shrink-0 border-t border-jukebox-gold/20">
+                <MemberList />
+              </div>
+            </>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ChatPanel />
+            </div>
+          )}
         </aside>
       </div>
 
@@ -460,17 +508,59 @@ export default function RoomPage() {
             transition={{ duration: 0.3, ease: 'easeInOut' }}
             className="overflow-hidden border-t border-jukebox-gold/20"
           >
-            <div className="px-3 py-3">
-              <SearchBar />
+            <div className="px-3 py-2 border-b border-jukebox-gold/15 bg-black/40">
+              <div className="flex items-center gap-1 bg-black/50 p-1 rounded-xl border border-white/10 w-full">
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab('queue')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all',
+                    activeRightTab === 'queue'
+                      ? 'bg-jukebox-gold text-jukebox-black'
+                      : 'text-jukebox-cream/60'
+                  )}
+                >
+                  <Music className="h-3.5 w-3.5" />
+                  Queue ({queue.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab('chat')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all relative',
+                    activeRightTab === 'chat'
+                      ? 'bg-jukebox-gold text-jukebox-black'
+                      : 'text-jukebox-cream/60'
+                  )}
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  Chat
+                  {unreadCount > 0 && activeRightTab !== 'chat' && (
+                    <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-black text-white ml-1">
+                      {unreadCount}
+                    </span>
+                  )}
+                </button>
+              </div>
             </div>
 
-            <div className="max-h-[42vh] overflow-y-auto">
-              <Queue />
-            </div>
-
-            <div className="border-t border-jukebox-gold/20">
-              <MemberList />
-            </div>
+            {activeRightTab === 'queue' ? (
+              <>
+                <div className="px-3 py-3">
+                  <SearchBar />
+                </div>
+                <div className="max-h-[38vh] overflow-y-auto">
+                  <Queue />
+                </div>
+                <div className="border-t border-jukebox-gold/20">
+                  <MemberList />
+                </div>
+              </>
+            ) : (
+              <div className="h-[44vh]">
+                <ChatPanel />
+              </div>
+            )}
           </motion.div>
 
           <button
