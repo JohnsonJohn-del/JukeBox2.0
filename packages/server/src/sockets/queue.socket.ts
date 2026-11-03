@@ -12,7 +12,64 @@ export function registerQueueHandlers(
       const userId = socket.data.userId
       const { roomId, videoId, title, artist, duration, thumbnail, musicVideoId, hasVideo } = payload
 
-      await queueService.addSong(roomId, userId, {
+      let addedItem: any
+      try {
+        addedItem = await queueService.addSong(roomId, userId, {
+          videoId,
+          title,
+          artist,
+          duration,
+          thumbnail,
+          musicVideoId,
+          hasVideo,
+        })
+      } catch (err: any) {
+        if (err.code === 'DUPLICATE_SONG') {
+          // If already in queue, continue
+        } else {
+          throw err
+        }
+      }
+
+      const state = getOrCreatePlaybackState(roomId)
+
+      // If nothing is playing or playback is stopped, play this song immediately
+      if (!state.currentTrack || state.playbackState === 'stopped') {
+        const nextTrack = await queueService.getNextTrack(roomId)
+        state.currentTrack = nextTrack || addedItem
+        state.playbackState = 'playing'
+        state.playbackPosition = 0
+        state.playbackStartTime = Date.now()
+        state.isVideoMode = true
+
+        if (state.currentTrack) {
+          io.to(roomId).emit('track_changed', { track: state.currentTrack })
+        }
+      }
+
+      const queue = await queueService.getQueue(roomId)
+      io.to(roomId).emit('queue_updated', { queue })
+
+      if (state.currentTrack) {
+        io.to(roomId).emit('playback_state', {
+          state: state.playbackState,
+          position: state.playbackPosition,
+          track: state.currentTrack,
+          isVideoMode: state.isVideoMode,
+        })
+      }
+    } catch (error: any) {
+      socket.emit('error', { message: error.message || 'Failed to add song', code: 'ADD_SONG_FAILED' })
+    }
+  })
+
+  // Play a song immediately (Host action from SearchBar or Queue)
+  socket.on('play_song_now' as any, async (payload: any) => {
+    try {
+      const userId = socket.data.userId
+      const { roomId, videoId, title, artist, duration, thumbnail, musicVideoId, hasVideo } = payload
+
+      const track = await queueService.playSongNow(roomId, userId, {
         videoId,
         title,
         artist,
@@ -23,33 +80,24 @@ export function registerQueueHandlers(
       })
 
       const state = getOrCreatePlaybackState(roomId)
+      state.currentTrack = track
+      state.playbackState = 'playing'
+      state.playbackPosition = 0
+      state.playbackStartTime = Date.now()
+      state.isVideoMode = true
 
-      if (!state.currentTrack) {
-        const nextTrack = await queueService.getNextTrack(roomId)
-
-        state.currentTrack = nextTrack
-        state.playbackState = nextTrack ? 'playing' : 'stopped'
-        state.playbackPosition = 0
-        state.playbackStartTime = nextTrack ? Date.now() : null
-
-        if (nextTrack) {
-          io.to(roomId).emit('track_changed', { track: nextTrack })
-        }
-      }
+      io.to(roomId).emit('track_changed', { track })
+      io.to(roomId).emit('playback_state', {
+        state: 'playing',
+        position: 0,
+        track,
+        isVideoMode: true,
+      })
 
       const queue = await queueService.getQueue(roomId)
       io.to(roomId).emit('queue_updated', { queue })
-
-      if (state.currentTrack && state.playbackState === 'playing') {
-        io.to(roomId).emit('playback_state', {
-          state: 'playing',
-          position: state.playbackPosition,
-          track: state.currentTrack,
-          isVideoMode: state.isVideoMode,
-        })
-      }
     } catch (error: any) {
-      socket.emit('error', { message: error.message || 'Failed to add song', code: 'ADD_SONG_FAILED' })
+      socket.emit('error', { message: error.message || 'Failed to play song', code: 'PLAY_FAILED' })
     }
   })
 

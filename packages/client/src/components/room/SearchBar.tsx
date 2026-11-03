@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Loader2, Clock, Plus, AlertCircle, Radio, Disc3, Film } from 'lucide-react';
+import { Search, Loader2, Clock, Plus, AlertCircle, Radio, Disc3, Film, Play } from 'lucide-react';
 import { searchService } from '@/services/search';
 import { useQueue } from '@/hooks/useQueue';
 import { useQueueStore } from '@/store/queueStore';
 import { useAuthStore } from '@/store/authStore';
+import { useRoomStore } from '@/store/roomStore';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import type { SearchResult } from '@/types';
@@ -36,9 +37,10 @@ export function SearchBar({ className }: { className?: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  const { addSong, isAddCooldown } = useQueue();
+  const { addSong, playSongNow, isAddCooldown } = useQueue();
   const queue = useQueueStore((s) => s.queue);
   const user = useAuthStore((s) => s.user);
+  const isHost = useRoomStore((s) => s.isHost);
   const currentUserId = user?.id ?? '';
 
   const userQueueCount = queue.filter((item) => item.addedBy === currentUserId).length;
@@ -103,8 +105,26 @@ export function SearchBar({ className }: { className?: string }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  function handleSelect(result: SearchResult) {
-    if (maxQueueReached || isAddCooldown) return;
+  function handlePlayNow(result: SearchResult, e?: React.MouseEvent) {
+    if (e) e.stopPropagation();
+    playSongNow(
+      result.videoId,
+      result.title,
+      result.artist,
+      result.duration,
+      getSearchThumbnail(result),
+      result.musicVideoId,
+      result.hasVideo,
+    );
+    setQuery('');
+    setResults([]);
+    setIsOpen(false);
+    inputRef.current?.blur();
+  }
+
+  function handleAddToQueue(result: SearchResult, e?: React.MouseEvent) {
+    if (e) e.stopPropagation();
+    if (!isHost && (maxQueueReached || isAddCooldown)) return;
 
     addSong(
       result.videoId,
@@ -120,6 +140,14 @@ export function SearchBar({ className }: { className?: string }) {
     setResults([]);
     setIsOpen(false);
     inputRef.current?.blur();
+  }
+
+  function handleSelect(result: SearchResult) {
+    if (isHost) {
+      handlePlayNow(result);
+    } else {
+      handleAddToQueue(result);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -165,7 +193,7 @@ export function SearchBar({ className }: { className?: string }) {
           onFocus={() => {
             if (results.length > 0 || isLoading) setIsOpen(true);
           }}
-          placeholder="Search YouTube Music..."
+          placeholder="Search YouTube Music (click song to play instantly)..."
           className="h-11 rounded-xl border-jukebox-gold/20 bg-black/45 pl-10 pr-10 text-sm font-semibold text-jukebox-cream placeholder:text-black/40 dark:placeholder:text-jukebox-cream/30 focus-visible:ring-jukebox-cyan/35"
         />
 
@@ -191,7 +219,7 @@ export function SearchBar({ className }: { className?: string }) {
                   YouTube Music Results
                 </p>
                 <p className="mt-1 text-xs text-jukebox-cream/45">
-                  Official tracks with automatic Video Mode counterpart resolution
+                  Click song or Play to start video & music immediately &bull; Click + to queue
                 </p>
               </div>
               <Disc3 className="h-4 w-4 text-jukebox-cyan/70" />
@@ -210,24 +238,22 @@ export function SearchBar({ className }: { className?: string }) {
             ) : (
               <div className="max-h-[360px] overflow-y-auto py-2">
                 {results.map((result, idx) => {
-                  const addDisabled = isAddCooldown || maxQueueReached;
+                  const addDisabled = !isHost && (isAddCooldown || maxQueueReached);
                   const thumbnailUrl = getSearchThumbnail(result);
                   const hasVideo = Boolean(result.hasVideo && result.musicVideoId);
 
                   return (
-                    <motion.button
+                    <motion.div
                       key={result.videoId}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: idx * 0.03 }}
                       onClick={() => handleSelect(result)}
-                      disabled={addDisabled}
                       className={cn(
-                        'flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors',
+                        'flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors cursor-pointer group',
                         selectedIndex === idx
                           ? 'bg-jukebox-cyan/10'
-                          : 'hover:bg-jukebox-gold/5',
-                        addDisabled && 'cursor-not-allowed opacity-45',
+                          : 'hover:bg-jukebox-gold/10',
                       )}
                     >
                       <img
@@ -238,7 +264,7 @@ export function SearchBar({ className }: { className?: string }) {
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <p className="truncate text-sm font-bold text-jukebox-cream">
+                          <p className="truncate text-sm font-bold text-jukebox-cream group-hover:text-jukebox-gold transition-colors">
                             {result.title}
                           </p>
                           {hasVideo && (
@@ -247,32 +273,41 @@ export function SearchBar({ className }: { className?: string }) {
                             </span>
                           )}
                         </div>
-                        <p className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-jukebox-cream/35">
+                        <p className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-jukebox-cream/45">
                           {result.artist}
                         </p>
                       </div>
 
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         <span className="text-[10px] font-black tracking-widest text-jukebox-gold/70">
                           {formatDuration(result.duration)}
                         </span>
 
-                        {isAddCooldown ? (
-                          <span className="flex items-center gap-1 rounded-full border border-jukebox-gold/25 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-jukebox-gold">
-                            <Clock className="h-3 w-3" />
-                            Wait
-                          </span>
-                        ) : maxQueueReached ? (
-                          <span className="rounded-full border border-jukebox-red-bright/30 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-jukebox-red-bright">
-                            Full
-                          </span>
-                        ) : (
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full jukebox-chrome-button">
-                            <Plus className="h-4 w-4 text-jukebox-black" />
-                          </div>
-                        )}
+                        {/* Direct Play Now Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => handlePlayNow(result, e)}
+                          title="Play Now (Starts Video Immediately)"
+                          className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 hover:bg-red-500 text-white shadow-md transition-transform hover:scale-110 active:scale-95"
+                        >
+                          <Play className="h-3.5 w-3.5 fill-current ml-0.5" />
+                        </button>
+
+                        {/* Add to Queue Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleAddToQueue(result, e)}
+                          disabled={addDisabled}
+                          title="Add to Queue"
+                          className={cn(
+                            "flex h-8 w-8 items-center justify-center rounded-full jukebox-chrome-button transition-transform hover:scale-105 active:scale-95",
+                            addDisabled && "opacity-40 cursor-not-allowed"
+                          )}
+                        >
+                          <Plus className="h-4 w-4 text-jukebox-black" />
+                        </button>
                       </div>
-                    </motion.button>
+                    </motion.div>
                   );
                 })}
               </div>

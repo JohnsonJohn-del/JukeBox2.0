@@ -393,3 +393,63 @@ export async function reorderQueueBatch(
 
   return updatedQueue || []
 }
+
+
+export async function playSongNow(
+  roomId: string,
+  userId: string,
+  songData: {
+    videoId: string
+    title: string
+    artist: string
+    duration: number
+    thumbnail?: string | null
+    musicVideoId?: string | null
+    hasVideo?: boolean
+  }
+): Promise<QueueItem> {
+  const db = getDbClient()
+  const itemId = uuidv4()
+  const now = new Date().toISOString()
+
+  const { data: existing } = await db
+    .from('queue_items')
+    .select('*')
+    .eq('room_id', roomId)
+    .eq('video_id', songData.videoId)
+    .maybeSingle()
+
+  if (existing) {
+    await db
+      .from('queue_items')
+      .update({ is_played: true })
+      .eq('id', existing.id)
+    return { ...existing, is_played: true }
+  }
+
+  const { data: item, error } = await db
+    .from('queue_items')
+    .insert({
+      id: itemId,
+      room_id: roomId,
+      added_by: userId,
+      video_id: songData.videoId,
+      music_video_id: songData.musicVideoId || null,
+      has_video: Boolean(songData.hasVideo),
+      title: songData.title,
+      artist: songData.artist,
+      duration: songData.duration,
+      thumbnail: songData.thumbnail || null,
+      position: 0,
+      is_played: true,
+      added_at: now,
+    })
+    .select('*')
+    .single()
+
+  if (error || !item) {
+    throw new AppError('Failed to play song', 500, 'PLAY_FAILED')
+  }
+
+  return item
+}

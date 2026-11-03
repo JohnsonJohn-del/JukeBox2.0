@@ -23,7 +23,7 @@ export function getOrCreatePlaybackState(roomId: string): RoomPlaybackState {
       playbackState: 'stopped',
       playbackPosition: 0,
       playbackStartTime: null,
-      isVideoMode: false,
+      isVideoMode: true,
       playedTrackIds: new Set(),
     }
     roomPlaybackStates.set(roomId, state)
@@ -39,7 +39,7 @@ export function getPlaybackState(roomId: string): PlaybackState {
       playbackState: 'stopped',
       playbackPosition: 0,
       playbackStartTime: null,
-      isVideoMode: false,
+      isVideoMode: true,
     }
   }
 

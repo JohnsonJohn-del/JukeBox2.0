@@ -1,14 +1,20 @@
 import { io, Socket } from 'socket.io-client';
-import { SOCKET_URL } from '@/lib/constants';
+import { SOCKET_URL, getSocketUrl } from '@/lib/constants';
 
-export const socket: Socket = io(SOCKET_URL, {
+export const socket: Socket = io(getSocketUrl() || SOCKET_URL, {
   autoConnect: true,
   transports: ['websocket', 'polling'],
 });
 
 export function connect(token: string, roomId?: string): void {
+  const targetUrl = getSocketUrl();
+  if (targetUrl && (socket.io as any)?.uri !== targetUrl) {
+    (socket.io as any).uri = targetUrl;
+  }
   socket.auth = { token, roomId };
-  socket.connect();
+  if (!socket.connected) {
+    socket.connect();
+  }
 }
 
 export function disconnect(): void {

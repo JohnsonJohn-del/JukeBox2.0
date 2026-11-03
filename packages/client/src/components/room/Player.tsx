@@ -94,30 +94,45 @@ export function Player() {
 
   const { colors } = useThemeColors(getThumbnailUrl(currentTrack) || null);
 
+  // Global user interaction listener to unblock browser autoplay
+  useEffect(() => {
+    const onInteraction = () => {
+      setUserInteracted(true);
+      unMutePlayer();
+    };
+    window.addEventListener('click', onInteraction, { once: true });
+    window.addEventListener('keydown', onInteraction, { once: true });
+    return () => {
+      window.removeEventListener('click', onInteraction);
+      window.removeEventListener('keydown', onInteraction);
+    };
+  }, [unMutePlayer]);
+
   // Determine active video ID: in Video Mode prefer official music/lyric video
   const musicVideoId = currentTrack?.musicVideoId || (currentTrack as any)?.music_video_id || null;
   const audioVideoId = currentTrack?.videoId || (currentTrack as any)?.video_id || null;
   const hasOfficialVideo = Boolean(musicVideoId && musicVideoId !== audioVideoId);
   const targetVideoId = isVideoMode && musicVideoId ? musicVideoId : (musicVideoId || audioVideoId);
 
-  // Automatically load and start track when track or video mode changes
+  // Automatically load and start track when targetVideoId changes
   useEffect(() => {
     if (!targetVideoId) return;
 
     if (currentActiveVideoIdRef.current !== targetVideoId) {
       currentActiveVideoIdRef.current = targetVideoId;
       loadVideo(targetVideoId, currentTime || 0);
-      if (playbackState === 'playing') {
-        play();
-      }
+      play();
     }
-  }, [targetVideoId, isVideoMode, isReady, loadVideo, play, currentTime, playbackState]);
+  }, [targetVideoId, isVideoMode, isReady, loadVideo, play, currentTime]);
 
   // Synchronize with socket events
   useEffect(() => {
     function onPlaybackState(data: { state: string; position: number; track: QueueItem | null; isVideoMode?: boolean }) {
+      if (data.track) {
+        useQueueStore.getState().setCurrentTrack(data.track);
+        if (data.track.duration) setDuration(data.track.duration);
+      }
       setCurrentTime(data.position);
-      if (data.track?.duration) setDuration(data.track.duration);
       setPlaybackState(data.state as 'playing' | 'paused' | 'stopped');
 
       if (data.isVideoMode !== undefined) {
@@ -141,7 +156,10 @@ export function Player() {
       if (!data.track) return;
 
       const track = data.track;
+      useQueueStore.getState().setCurrentTrack(track);
       if (track.duration) setDuration(track.duration);
+      setCurrentTime(0);
+      setPlaybackState('playing');
 
       const mId = track.musicVideoId || (track as any).music_video_id;
       const vId = track.videoId || (track as any).video_id;
@@ -170,6 +188,10 @@ export function Player() {
       currentTrack: QueueItem | null;
       isVideoMode: boolean;
     }) {
+      if (data.currentTrack) {
+        useQueueStore.getState().setCurrentTrack(data.currentTrack);
+        if (data.currentTrack.duration) setDuration(data.currentTrack.duration);
+      }
       const localTime = getCurrentTime();
       const drift = Math.abs(localTime - data.playbackPosition);
 
@@ -326,36 +348,6 @@ export function Player() {
   const accentColor = colors.primary || '#d6a84f';
   const thumbnailUrl = getThumbnailUrl(currentTrack);
 
-  if (!currentTrack) {
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="flex h-full w-full items-center justify-center p-4"
-      >
-        <div className="jukebox-panel relative flex w-full max-w-2xl flex-col items-center overflow-hidden rounded-3xl p-10 text-center">
-          <div className="absolute inset-x-10 top-0 h-1 rounded-full jukebox-tube-red" />
-
-          <div className="flex h-28 w-28 items-center justify-center rounded-full jukebox-chrome-button">
-            <Music className="h-12 w-12 text-jukebox-black" />
-          </div>
-
-          <p className="font-button mt-6 text-[10px] font-black uppercase tracking-[0.32em] dark:text-jukebox-gold/75 text-jukebox-brass">
-            Waiting for Selection
-          </p>
-
-          <h2 className="font-heading mt-3 text-3xl font-black uppercase heading-tracking text-jukebox-cream">
-            Insert a Song
-          </h2>
-
-          <p className="font-body mt-3 max-w-sm text-lg leading-6 text-jukebox-cream/55">
-            Search YouTube Music to queue official tracks. Switch between Song & Video modes instantly!
-          </p>
-        </div>
-      </motion.div>
-    );
-  }
-
   return (
     <div
       className="relative flex h-full w-full items-center justify-center overflow-hidden p-3 sm:p-5 lg:p-6"
@@ -373,36 +365,6 @@ export function Player() {
         />
       </div>
 
-      {!userInteracted && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="absolute inset-0 z-50 flex cursor-pointer items-center justify-center bg-black/80 p-4 backdrop-blur-md"
-          onClick={handleEnablePlayback}
-        >
-          <motion.div
-            whileTap={{ scale: 0.94 }}
-            className="jukebox-panel flex max-w-sm flex-col items-center rounded-3xl p-7 text-center border border-jukebox-gold/40 shadow-2xl"
-          >
-            <div className="flex h-20 w-20 items-center justify-center rounded-full jukebox-chrome-button shadow-lg shadow-jukebox-gold/30">
-              <Play className="ml-1 h-9 w-9 text-jukebox-black" />
-            </div>
-
-            <p className="font-button mt-5 text-[10px] font-black uppercase tracking-[0.3em] text-jukebox-gold">
-              Power On Jukebox
-            </p>
-
-            <h3 className="font-heading mt-2 text-xl font-black uppercase heading-tracking text-jukebox-cream">
-              Tap to Start Video & Audio
-            </h3>
-
-            <p className="font-body mt-2 text-sm leading-5 text-jukebox-cream/65">
-              Browser policy requires one click to begin playing synchronized streaming media.
-            </p>
-          </motion.div>
-        </motion.div>
-      )}
-
       <div className="relative flex w-full max-w-[800px] flex-col items-center">
         {/* Native YouTube Music [ Song | Video ] Toggle Pill Bar */}
         <div className="mb-4 flex flex-col sm:flex-row items-center justify-between gap-3 w-full max-w-[640px] px-2">
@@ -419,7 +381,7 @@ export function Player() {
             ) : (
               <span className="inline-flex items-center gap-1 rounded-full border border-green-500/30 bg-green-950/30 px-2.5 py-0.5 text-[10px] font-medium text-green-300">
                 <Video className="h-3 w-3 text-green-400" />
-                Video Mode Available
+                Video Mode Active
               </span>
             )}
           </div>
@@ -478,17 +440,37 @@ export function Player() {
                 boxShadow: `0 0 38px var(--player-glow), 0 0 80px rgba(0,0,0,0.8)`,
               }}
             >
-              {/* YouTube IFrame Player Container (Active in both modes for audio, visible in Video Mode) */}
+              {/* YouTube IFrame Player Container (Always mounted in DOM to prevent API disposal) */}
               <div
                 className={`absolute inset-0 w-full h-full transition-all duration-300 ${
-                  isVideoMode ? 'opacity-100 z-20 pointer-events-auto' : 'opacity-0 pointer-events-none -z-10'
+                  currentTrack && isVideoMode
+                    ? 'opacity-100 z-20 pointer-events-auto'
+                    : 'opacity-0 pointer-events-none -z-10'
                 }`}
               >
                 <div id="youtube-player-element" className="w-full h-full" />
               </div>
 
+              {/* Waiting for Selection State (When queue is completely empty) */}
+              {!currentTrack && (
+                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/95 p-6 text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full jukebox-chrome-button">
+                    <Music className="h-8 w-8 text-jukebox-black" />
+                  </div>
+                  <p className="font-button mt-4 text-[10px] font-black uppercase tracking-[0.3em] text-jukebox-gold">
+                    Waiting for Selection
+                  </p>
+                  <h3 className="font-heading mt-2 text-xl font-bold uppercase text-jukebox-cream">
+                    Choose a Song Above
+                  </h3>
+                  <p className="font-body mt-2 text-xs text-jukebox-cream/60 max-w-xs">
+                    Search YouTube Music above. Click any song to start video & music immediately!
+                  </p>
+                </div>
+              )}
+
               {/* YouTube Music Song Mode: High-Res Square Album Art View */}
-              {!isVideoMode && (
+              {currentTrack && !isVideoMode && (
                 <div
                   className="absolute inset-0 z-10 flex flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-[#181818]/60 via-[#121212]/90 to-[#0a0a0a] cursor-pointer"
                   onClick={() => handleToggleVideoMode(true)}
@@ -546,10 +528,10 @@ export function Player() {
           {/* Track Details & Bottom Info */}
           <div className="mt-5 text-center">
             <h3 className="font-heading truncate text-xl font-black uppercase heading-tracking text-jukebox-cream sm:text-2xl">
-              {currentTrack.title}
+              {currentTrack?.title || 'No Track Selected'}
             </h3>
             <p className="font-body mt-1 text-sm font-semibold text-jukebox-cream/70 sm:text-base">
-              {currentTrack.artist}
+              {currentTrack?.artist || 'Search songs above to begin playback'}
             </p>
           </div>
 
@@ -606,7 +588,7 @@ export function Player() {
             <motion.button
               whileTap={{ scale: 0.92 }}
               onClick={handlePlayPause}
-              className="jukebox-chrome-button flex h-14 w-14 items-center justify-center rounded-full shadow-lg"
+              className="jukebox-chrome-button flex h-14 w-14 items-center justify-center rounded-full shadow-lg cursor-pointer"
             >
               {isPlaying ? (
                 <Pause className="h-6 w-6 text-jukebox-black" />

@@ -71,170 +71,177 @@ export function usePlayer(
     setCurrentTime,
     setDuration,
     setPlaybackState,
-    setPlayerControls,
   } = usePlayerStore();
 
+  const loadPendingVideo = useCallback((p: YT.Player) => {
+    if (!pendingVideoRef.current) return;
+    const { videoId, startSeconds, autoPlay } = pendingVideoRef.current;
+    pendingVideoRef.current = null;
+
+    try {
+      p.loadVideoById({
+        videoId,
+        startSeconds: Math.floor(startSeconds),
+      });
+      p.unMute?.();
+      if (autoPlay) {
+        p.playVideo?.();
+      }
+    } catch (err) {
+      console.error('[usePlayer] Error loading pending video:', err);
+    }
+  }, []);
+
+  const startSyncInterval = useCallback((target?: YT.Player) => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    intervalRef.current = setInterval(() => {
+      const p = playerRef.current || target || window.ytPlayer;
+      let readFromPlayer = false;
+
+      if (p) {
+        try {
+          if (typeof p.getCurrentTime === 'function') {
+            const time = p.getCurrentTime();
+            if (typeof time === 'number' && !isNaN(time) && time >= 0) {
+              setCurrentTime(time);
+              readFromPlayer = true;
+            }
+          }
+
+          if (typeof p.getDuration === 'function') {
+            const dur = p.getDuration();
+            if (typeof dur === 'number' && !isNaN(dur) && dur > 0) {
+              setDuration(dur);
+            }
+          }
+
+          if (typeof p.getPlayerState === 'function') {
+            const state = p.getPlayerState();
+            if (state === window.YT?.PlayerState?.PLAYING) {
+              if (usePlayerStore.getState().playbackState !== 'playing') {
+                setPlaybackState('playing');
+              }
+            }
+          }
+        } catch {
+          // ignore during video transitions
+        }
+      }
+
+      // Active room timer fallback: If room playbackState is 'playing', smoothly advance seconds
+      if (!readFromPlayer && usePlayerStore.getState().playbackState === 'playing') {
+        const current = usePlayerStore.getState().currentTime;
+        const maxDur = usePlayerStore.getState().duration;
+        if (maxDur > 0 && current < maxDur) {
+          setCurrentTime(current + 1);
+        }
+      }
+    }, 1000);
+  }, [setCurrentTime, setDuration, setPlaybackState]);
+
+  const initializePlayer = useCallback(async () => {
+    try {
+      await loadYouTubeAPI();
+
+      // If player already exists on window and is healthy
+      if (window.ytPlayer && typeof window.ytPlayer.playVideo === 'function') {
+        playerRef.current = window.ytPlayer;
+        setIsReady(true);
+        startSyncInterval(window.ytPlayer);
+        if (pendingVideoRef.current) {
+          loadPendingVideo(window.ytPlayer);
+        }
+        return;
+      }
+
+      // Poll up to 30 times (4.5s) for container to mount in DOM
+      let attempts = 0;
+      while (!document.getElementById(containerId) && attempts < 30) {
+        await new Promise((r) => setTimeout(r, 150));
+        attempts++;
+      }
+
+      const container = document.getElementById(containerId);
+      if (!container) {
+        console.warn('[usePlayer] Element not found after polling:', containerId);
+        return;
+      }
+
+      const player = new window.YT.Player(containerId, {
+        height: '100%',
+        width: '100%',
+        playerVars: {
+          autoplay: 1,
+          controls: 1,
+          modestbranding: 1,
+          rel: 0,
+          playsinline: 1,
+          enablejsapi: 1,
+          origin: typeof window !== 'undefined' ? window.location.origin : undefined,
+        },
+        events: {
+          onReady: (event) => {
+            playerRef.current = event.target;
+            window.ytPlayer = event.target;
+            setIsReady(true);
+
+            console.log('[YouTube] Player ready on container:', containerId);
+            startSyncInterval(event.target);
+
+            if (pendingVideoRef.current) {
+              loadPendingVideo(event.target);
+            }
+          },
+
+          onStateChange: (event) => {
+            switch (event.data) {
+              case window.YT.PlayerState.PLAYING:
+                setPlaybackState('playing');
+                break;
+
+              case window.YT.PlayerState.PAUSED:
+                setPlaybackState('paused');
+                break;
+
+              case window.YT.PlayerState.BUFFERING:
+                setPlaybackState('buffering');
+                break;
+
+              case window.YT.PlayerState.ENDED:
+                setPlaybackState('stopped');
+                optionsRef.current?.onEnded?.();
+                break;
+
+              default:
+                break;
+            }
+          },
+
+          onError: (error) => {
+            const code = typeof error.data === 'number' ? error.data : -1;
+            console.error('[YouTube] Player error code:', code);
+            optionsRef.current?.onError?.(code);
+          },
+        },
+      });
+
+      playerRef.current = player;
+      window.ytPlayer = player;
+    } catch (err) {
+      console.error('[usePlayer] Initialization failed:', err);
+    }
+  }, [containerId, loadPendingVideo, setPlaybackState, startSyncInterval]);
+
   useEffect(() => {
-    let mounted = true;
-
-    async function initializePlayer() {
-      try {
-        await loadYouTubeAPI();
-
-        if (!mounted) return;
-
-        // If player already exists on window and is healthy
-        if (window.ytPlayer && typeof window.ytPlayer.playVideo === 'function') {
-          playerRef.current = window.ytPlayer;
-          setIsReady(true);
-          startSyncInterval(window.ytPlayer);
-          if (pendingVideoRef.current) {
-            loadPendingVideo(window.ytPlayer);
-          }
-          return;
-        }
-
-        const container = document.getElementById(containerId);
-        if (!container) {
-          console.warn('[usePlayer] Element not found:', containerId);
-          return;
-        }
-
-        const player = new window.YT.Player(containerId, {
-          height: '100%',
-          width: '100%',
-          playerVars: {
-            autoplay: 1,
-            controls: 1,
-            modestbranding: 1,
-            rel: 0,
-            playsinline: 1,
-            enablejsapi: 1,
-            origin: typeof window !== 'undefined' ? window.location.origin : undefined,
-          },
-          events: {
-            onReady: (event) => {
-              if (!mounted) return;
-
-              playerRef.current = event.target;
-              window.ytPlayer = event.target;
-              setIsReady(true);
-
-              console.log('[YouTube] Player ready on container:', containerId);
-              startSyncInterval(event.target);
-
-              if (pendingVideoRef.current) {
-                loadPendingVideo(event.target);
-              }
-            },
-
-            onStateChange: (event) => {
-              if (!mounted) return;
-
-              switch (event.data) {
-                case window.YT.PlayerState.PLAYING:
-                  setPlaybackState('playing');
-                  break;
-
-                case window.YT.PlayerState.PAUSED:
-                  setPlaybackState('paused');
-                  break;
-
-                case window.YT.PlayerState.BUFFERING:
-                  setPlaybackState('buffering');
-                  break;
-
-                case window.YT.PlayerState.ENDED:
-                  setPlaybackState('stopped');
-                  optionsRef.current?.onEnded?.();
-                  break;
-
-                default:
-                  break;
-              }
-            },
-
-            onError: (error) => {
-              const code = typeof error.data === 'number' ? error.data : -1;
-              console.error('[YouTube] Player error code:', code);
-              optionsRef.current?.onError?.(code);
-            },
-          },
-        });
-
-        playerRef.current = player;
-        window.ytPlayer = player;
-      } catch (err) {
-        console.error('[usePlayer] Initialization failed:', err);
-      }
-    }
-
-    function loadPendingVideo(p: YT.Player) {
-      if (!pendingVideoRef.current) return;
-      const { videoId, startSeconds, autoPlay } = pendingVideoRef.current;
-      pendingVideoRef.current = null;
-
-      try {
-        p.loadVideoById({
-          videoId,
-          startSeconds: Math.floor(startSeconds),
-        });
-        if (autoPlay) {
-          p.playVideo();
-        }
-      } catch (err) {
-        console.error('[usePlayer] Error loading pending video:', err);
-      }
-    }
-
-    function startSyncInterval(target: YT.Player) {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-
-      intervalRef.current = setInterval(() => {
-        const p = playerRef.current || target || window.ytPlayer;
-        let readFromPlayer = false;
-
-        if (p) {
-          try {
-            if (typeof p.getCurrentTime === 'function') {
-              const time = p.getCurrentTime();
-              if (typeof time === 'number' && !isNaN(time) && time > 0) {
-                setCurrentTime(time);
-                readFromPlayer = true;
-              }
-            }
-
-            if (typeof p.getDuration === 'function') {
-              const dur = p.getDuration();
-              if (typeof dur === 'number' && !isNaN(dur) && dur > 0) {
-                setDuration(dur);
-              }
-            }
-          } catch {
-            // ignore during video transitions
-          }
-        }
-
-        // Active room timer fallback: If room playbackState is 'playing', smoothly advance seconds
-        if (!readFromPlayer && usePlayerStore.getState().playbackState === 'playing') {
-          const current = usePlayerStore.getState().currentTime;
-          const maxDur = usePlayerStore.getState().duration;
-          if (maxDur > 0 && current < maxDur) {
-            setCurrentTime(current + 1);
-          }
-        }
-      }, 1000);
-    }
-
     initializePlayer();
 
     return () => {
-      mounted = false;
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
     };
-  }, [containerId, setCurrentTime, setDuration, setPlaybackState]);
+  }, [initializePlayer]);
 
   const loadVideo = useCallback((videoId: string, startSeconds: number = 0) => {
     try {
@@ -244,14 +251,17 @@ export function usePlayer(
           videoId,
           startSeconds: Math.floor(startSeconds),
         });
+        p.unMute?.();
+        p.playVideo?.();
       } else {
         pendingVideoRef.current = { videoId, startSeconds, autoPlay: true };
+        initializePlayer();
       }
     } catch (err) {
       console.error('[YouTube] loadVideo error:', err);
       pendingVideoRef.current = { videoId, startSeconds, autoPlay: true };
     }
-  }, []);
+  }, [initializePlayer]);
 
   const play = useCallback(() => {
     try {
@@ -295,42 +305,37 @@ export function usePlayer(
       const p = playerRef.current || window.ytPlayer;
       p?.unMute?.();
     } catch (err) {
-      console.error('[YouTube] unmute error:', err);
+      console.error('[YouTube] unMute error:', err);
     }
   }, []);
 
   const getCurrentTime = useCallback((): number => {
     try {
       const p = playerRef.current || window.ytPlayer;
-      if (p && typeof p.getCurrentTime === 'function') {
-        return p.getCurrentTime() || 0;
-      }
+      return p?.getCurrentTime?.() ?? 0;
     } catch {
-      // ignore
+      return 0;
     }
-    return usePlayerStore.getState().currentTime;
   }, []);
 
-  // Register controls to store so FooterPlayerControls can reuse without double initialization
-  useEffect(() => {
-    setPlayerControls({
-      play,
-      pause,
-      seekTo,
-      mute,
-      unMute,
-      loadVideo,
-    });
-  }, [play, pause, seekTo, mute, unMute, loadVideo, setPlayerControls]);
+  const getDuration = useCallback((): number => {
+    try {
+      const p = playerRef.current || window.ytPlayer;
+      return p?.getDuration?.() ?? 0;
+    } catch {
+      return 0;
+    }
+  }, []);
 
   return {
     loadVideo,
     play,
     pause,
     seekTo,
-    isReady,
-    getCurrentTime,
     mute,
     unMute,
+    isReady,
+    getCurrentTime,
+    getDuration,
   };
 }

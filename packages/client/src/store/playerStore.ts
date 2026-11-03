@@ -31,7 +31,7 @@ export const usePlayerStore = create<PlayerState>()((set) => ({
   playbackState: 'stopped',
   currentTime: 0,
   duration: 0,
-  isVideoMode: false,
+  isVideoMode: true,
   activeVideoId: null,
   playerControls: null,
 

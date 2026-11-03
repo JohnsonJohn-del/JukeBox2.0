@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { GripVertical, Trash2, Music, Disc3, ListMusic, Film } from 'lucide-react';
+import { GripVertical, Trash2, Music, Disc3, ListMusic, Film, Play } from 'lucide-react';
 import { useQueueStore } from '@/store/queueStore';
 import { useRoomStore } from '@/store/roomStore';
 import { useQueue } from '@/hooks/useQueue';
@@ -33,6 +33,7 @@ function QueueItemRow({
   isCurrent,
   isHost,
   currentUserId,
+  onPlayNow,
   onRemove,
   onDragStart,
   onDragOver,
@@ -44,6 +45,7 @@ function QueueItemRow({
   isCurrent: boolean;
   isHost: boolean;
   currentUserId: string;
+  onPlayNow?: (item: QueueItem) => void;
   onRemove: (id: string) => void;
   onDragStart: (index: number) => void;
   onDragOver: (e: React.DragEvent, index: number) => void;
@@ -136,25 +138,36 @@ function QueueItemRow({
           </div>
         </div>
 
-        <div className="flex shrink-0 flex-col items-end gap-1">
+        <div className="flex shrink-0 items-center gap-2">
           <span className="text-[10px] font-black tracking-widest text-jukebox-gold/70">
             {formatTime(item.duration)}
           </span>
 
-          {isCurrent && (
+          {isCurrent ? (
             <span className="rounded-full border border-jukebox-cyan/40 bg-jukebox-cyan/10 px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.18em] text-jukebox-cyan">
               Live
             </span>
-          )}
-
-          {isHost && !isCurrent && (
-            <button
-              onClick={() => onRemove(item.id)}
-              className="rounded-full p-1 text-jukebox-cream/25 opacity-0 transition-all hover:bg-jukebox-red/10 hover:text-jukebox-red-bright group-hover:opacity-100"
-              title="Remove song"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
+          ) : (
+            isHost && (
+              <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                {onPlayNow && (
+                  <button
+                    onClick={() => onPlayNow(item)}
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-red-600 hover:bg-red-500 text-white shadow-sm transition-transform hover:scale-110 active:scale-95"
+                    title="Play this song now"
+                  >
+                    <Play className="h-3 w-3 fill-current ml-0.5" />
+                  </button>
+                )}
+                <button
+                  onClick={() => onRemove(item.id)}
+                  className="rounded-full p-1.5 text-jukebox-cream/30 hover:bg-jukebox-red/15 hover:text-jukebox-red-bright transition-colors"
+                  title="Remove song"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )
           )}
         </div>
       </div>
@@ -165,7 +178,7 @@ function QueueItemRow({
 export function Queue({ className }: { className?: string }) {
   const { queue, currentTrack } = useQueueStore();
   const { isHost } = useRoomStore();
-  const { removeSong, reorderQueue } = useQueue();
+  const { removeSong, reorderQueue, playSongNow } = useQueue();
   const user = useAuthStore((s) => s.user);
   const currentUserId = user?.id ?? '';
 
@@ -196,90 +209,106 @@ export function Queue({ className }: { className?: string }) {
 
       const reordered = items.map((item, idx) => ({
         id: item.id,
-        position: idx + 1,
+        position: idx,
       }));
 
       reorderQueue(reordered);
-
       dragItem.current = null;
       dragOverItem.current = null;
     },
     [queue, reorderQueue],
   );
 
-  const isEmpty = queue.length === 0 && !currentTrack;
+  const handlePlayNow = useCallback(
+    (item: QueueItem) => {
+      playSongNow(
+        item.videoId,
+        item.title,
+        item.artist,
+        item.duration,
+        getThumbnailUrl(item),
+        item.musicVideoId,
+        item.hasVideo,
+      );
+    },
+    [playSongNow],
+  );
 
   return (
-    <div className={cn('flex h-full flex-col', className)}>
-      <div className="flex items-center justify-between border-b border-jukebox-gold/20 px-4 py-3">
-        <div className="flex items-center gap-2.5">
-          <ListMusic className="h-4 w-4 dark:text-jukebox-gold/75 text-jukebox-brass" />
+    <div className={cn('jukebox-panel flex h-full flex-col overflow-hidden rounded-3xl p-4 sm:p-5', className)}>
+      <div className="flex items-center justify-between border-b border-jukebox-gold/15 pb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-jukebox-gold/30 bg-black/40">
+            <ListMusic className="h-5 w-5 text-jukebox-gold" />
+          </div>
           <div>
-            <p className="font-button text-[9px] font-black uppercase tracking-[0.28em] dark:text-jukebox-gold/70 text-jukebox-brass">
-              Program Queue
+            <h2 className="font-heading text-lg font-black uppercase heading-tracking text-jukebox-cream">
+              Song Queue
+            </h2>
+            <p className="font-button text-[10px] font-black uppercase tracking-[0.2em] text-jukebox-gold/60">
+              {queue.length} {queue.length === 1 ? 'Track' : 'Tracks'} Queued
             </p>
-            <h3 className="font-heading text-lg font-black uppercase heading-tracking text-jukebox-cream">
-              Upcoming Selections
-            </h3>
           </div>
         </div>
 
-        <span className="font-roomcode rounded-xl border border-jukebox-gold/30 bg-black/45 px-2.5 py-1 text-xs font-bold text-jukebox-gold">
-          {queue.length + (currentTrack ? 1 : 0)}
-        </span>
+        {isHost && queue.length > 1 && (
+          <span className="hidden rounded-full border border-jukebox-gold/20 bg-jukebox-gold/5 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-jukebox-gold/70 sm:inline-block">
+            Drag &bull; Play &bull; Manage
+          </span>
+        )}
       </div>
 
-      <ScrollArea className="flex-1 p-3">
-        {isEmpty ? (
-          <div className="flex h-64 flex-col items-center justify-center text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-jukebox-gold/20 bg-black/35">
-              <Music className="h-6 w-6 text-jukebox-gold/40" />
-            </div>
+      <ScrollArea className="flex-1 pt-3 pr-2">
+        <div className="space-y-2">
+          {currentTrack && (
+            <QueueItemRow
+              key={currentTrack.id || 'current-track'}
+              item={currentTrack}
+              isCurrent={true}
+              isHost={isHost}
+              currentUserId={currentUserId}
+              onRemove={removeSong}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDragEnd={handleDragEnd}
+              onDrop={handleDrop}
+              index={0}
+            />
+          )}
 
-            <p className="font-button mt-4 text-[10px] font-black uppercase tracking-[0.24em] text-jukebox-gold/50">
-              Queue Depleted
-            </p>
-
-            <p className="font-body mt-1 text-sm text-jukebox-cream/45">
-              Search YouTube Music to add songs to the program.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {currentTrack && (
+          <AnimatePresence initial={false}>
+            {queue.map((item, index) => (
               <QueueItemRow
-                item={currentTrack}
-                isCurrent={true}
-                isHost={false}
+                key={item.id}
+                item={item}
+                isCurrent={false}
+                isHost={isHost}
                 currentUserId={currentUserId}
-                onRemove={() => {}}
-                onDragStart={() => {}}
-                onDragOver={() => {}}
-                onDragEnd={() => {}}
-                onDrop={() => {}}
-                index={0}
+                onPlayNow={handlePlayNow}
+                onRemove={removeSong}
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDragEnd={handleDragEnd}
+                onDrop={handleDrop}
+                index={index + (currentTrack ? 1 : 0)}
               />
-            )}
+            ))}
+          </AnimatePresence>
 
-            <AnimatePresence mode="popLayout">
-              {queue.map((item, idx) => (
-                <QueueItemRow
-                  key={item.id}
-                  item={item}
-                  isCurrent={false}
-                  isHost={isHost}
-                  currentUserId={currentUserId}
-                  onRemove={removeSong}
-                  onDragStart={handleDragStart}
-                  onDragOver={handleDragOver}
-                  onDragEnd={handleDragEnd}
-                  onDrop={handleDrop}
-                  index={currentTrack ? idx + 1 : idx}
-                />
-              ))}
-            </AnimatePresence>
-          </div>
-        )}
+          {!currentTrack && queue.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-jukebox-gold/20 bg-black/30">
+                <Music className="h-6 w-6 text-jukebox-gold/40" />
+              </div>
+              <p className="font-heading mt-4 text-base font-bold text-jukebox-cream/60">
+                The Queue is Empty
+              </p>
+              <p className="font-body mt-1 text-xs text-jukebox-cream/35">
+                Search songs above to build the playlist!
+              </p>
+            </div>
+          )}
+        </div>
       </ScrollArea>
     </div>
   );

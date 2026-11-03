@@ -1,4 +1,4 @@
-import { API_URL } from '@/lib/constants';
+import { API_URL, getApiUrl } from '@/lib/constants';
 import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
 
@@ -41,6 +41,10 @@ class ApiClient {
     this.baseUrl = baseUrl;
   }
 
+  private getEffectiveBaseUrl(): string {
+    return getApiUrl() || this.baseUrl;
+  }
+
   private getToken(): string | null {
     return useAuthStore.getState().token;
   }
@@ -60,7 +64,8 @@ class ApiClient {
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
+      const activeBase = this.getEffectiveBaseUrl();
+      const response = await fetch(`${activeBase}${path}`, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
