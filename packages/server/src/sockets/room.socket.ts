@@ -130,8 +130,25 @@ export function registerRoomHandlers(
 
       const updatedMembers = await roomService.getRoomMembers(roomId)
 
+      if ((payload as any).endRoom && wasHost) {
+        await roomService.closeRoom(roomId)
+        try {
+          const { roomPlaybackStates } = require('./playback.socket')
+          roomPlaybackStates?.delete(roomId)
+        } catch {}
+        io.to(roomId).emit('room_closed', {
+          roomId,
+          message: 'The host has ended this room session.',
+          closedBy: userId,
+        } as any)
+        return
+      }
+
       if (updatedMembers.length === 0) {
-        io.to(roomId).emit('room_closed', {})
+        io.to(roomId).emit('room_closed', {
+          roomId,
+          message: 'Room closed as all members have left.',
+        } as any)
       } else if (wasHost && updatedMembers.length > 0) {
         const newHost = updatedMembers[0]
         await roomService.transferHost(roomId, newHost.user_id)
@@ -139,6 +156,39 @@ export function registerRoomHandlers(
       }
     } catch (error: any) {
       socket.emit('error', { message: error.message || 'Failed to leave room', code: 'LEAVE_FAILED' })
+    }
+  })
+
+  socket.on('close_room' as any, async (payload: any) => {
+    try {
+      const userId = socket.data.userId
+      const { roomId } = payload
+
+      const roomData = await roomService.getRoom(roomId)
+      if (!roomData.room) {
+        socket.emit('error', { message: 'Room not found', code: 'ROOM_NOT_FOUND' })
+        return
+      }
+
+      const member = roomData.members.find((m) => m.user_id === userId)
+      if (!member?.is_host && roomData.room.host_id !== userId) {
+        socket.emit('error', { message: 'Only the host can close the room', code: 'NOT_HOST' })
+        return
+      }
+
+      await roomService.closeRoom(roomId)
+      try {
+        const { roomPlaybackStates } = require('./playback.socket')
+        roomPlaybackStates?.delete(roomId)
+      } catch {}
+
+      io.to(roomId).emit('room_closed', {
+        roomId,
+        message: 'The host has ended this room session.',
+        closedBy: userId,
+      } as any)
+    } catch (error: any) {
+      socket.emit('error', { message: error.message || 'Failed to close room', code: 'CLOSE_FAILED' })
     }
   })
 

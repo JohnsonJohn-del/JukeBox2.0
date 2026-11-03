@@ -253,6 +253,18 @@ export async function leaveRoom(
   }
 }
 
+export async function closeRoom(roomId: string): Promise<void> {
+  const db = getDbClient()
+  await db
+    .from('rooms')
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .eq('id', roomId)
+  await db
+    .from('room_members')
+    .delete()
+    .eq('room_id', roomId)
+}
+
 export async function getRoom(roomId: string): Promise<{
   room: Room | null
   members: RoomMember[]

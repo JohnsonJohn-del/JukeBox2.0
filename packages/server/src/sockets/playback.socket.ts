@@ -13,7 +13,7 @@ export interface RoomPlaybackState {
   playedTrackIds: Set<string>
 }
 
-const roomPlaybackStates = new Map<string, RoomPlaybackState>()
+export const roomPlaybackStates = new Map<string, RoomPlaybackState>()
 
 export function persistPlaybackState(roomId: string, state: RoomPlaybackState): void {
   try {
@@ -256,6 +256,12 @@ export function registerPlaybackHandlers(
         state.playbackPosition = position
         state.playbackStartTime = Date.now()
         persistPlaybackState(roomId, state)
+
+        socket.to(roomId).emit('sync_tick' as any, {
+          playbackPosition: position,
+          serverTimestamp: Date.now(),
+          playbackState: state.playbackState,
+        })
       }
     } catch {
       // Non-blocking progress sync

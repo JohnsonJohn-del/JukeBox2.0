@@ -115,7 +115,7 @@ export function Player() {
     };
   }, [unMutePlayer]);
 
-  // Periodic host progress heartbeat (emitted every 2.5s to keep server position authoritative)
+  // Periodic host progress heartbeat (emitted every 2.0s to keep server and all guests authoritative)
   useEffect(() => {
     if (!isHost || playbackState !== 'playing' || !room?.id) return;
 
@@ -124,10 +124,21 @@ export function Player() {
       if (activeTime > 0) {
         socket.emit('host_progress', { roomId: room.id, position: activeTime });
       }
-    }, 2500);
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [isHost, playbackState, room?.id, socket, getCurrentTime, currentTime]);
+
+  // Periodic non-host sync polling (every 3.0s to ensure zero drift across devices)
+  useEffect(() => {
+    if (isHost || !room?.id) return;
+
+    const interval = setInterval(() => {
+      socket.emit('request_sync', { roomId: room.id, clientSendTime: Date.now() });
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [isHost, room?.id, socket]);
 
   // Determine active video ID: in Video Mode prefer official music/lyric video
   const musicVideoId = currentTrack?.musicVideoId || (currentTrack as any)?.music_video_id || null;
@@ -161,6 +172,13 @@ export function Player() {
         setVideoMode(data.isVideoMode);
       }
 
+      if (!isHost && typeof data.position === 'number') {
+        const localTime = getCurrentTime();
+        if (Math.abs(localTime - data.position) > 1.0) {
+          seekTo(data.position);
+        }
+      }
+
       if (data.state === 'playing') {
         play();
       } else if (data.state === 'paused') {
@@ -173,13 +191,14 @@ export function Player() {
       seekTo(data.position);
     }
 
-    function onTrackChanged(data: { track: QueueItem | null }) {
+    function onTrackChanged(data: { track: QueueItem | null; startPosition?: number }) {
       if (!data.track) return;
 
       const track = data.track;
       useQueueStore.getState().setCurrentTrack(track);
       if (track.duration) setDuration(track.duration);
-      setCurrentTime(0);
+      const startPos = data.startPosition || 0;
+      setCurrentTime(startPos);
       setPlaybackState('playing');
 
       const mId = track.musicVideoId || (track as any).music_video_id;
@@ -188,7 +207,7 @@ export function Player() {
 
       if (nextTarget) {
         currentActiveVideoIdRef.current = nextTarget;
-        loadVideo(nextTarget, 0);
+        loadVideo(nextTarget, startPos);
         play();
       }
     }
@@ -203,6 +222,26 @@ export function Player() {
       });
     }
 
+    function onSyncTick(data: { playbackPosition: number; serverTimestamp: number; playbackState: string }) {
+      if (isHost) return;
+
+      const elapsed = Math.max(0, (Date.now() - data.serverTimestamp) / 1000);
+      const targetPos = data.playbackPosition + (data.playbackState === 'playing' ? elapsed : 0);
+      const localTime = getCurrentTime();
+      const drift = Math.abs(localTime - targetPos);
+
+      if (drift > 1.2) {
+        seekTo(targetPos);
+        setCurrentTime(targetPos);
+      }
+
+      if (data.playbackState === 'playing' && playbackState !== 'playing') {
+        play();
+      } else if (data.playbackState === 'paused' && playbackState === 'playing') {
+        pause();
+      }
+    }
+
     function onSyncState(data: {
       playbackPosition: number;
       playbackState: string;
@@ -211,8 +250,22 @@ export function Player() {
       clientSendTime?: number;
     }) {
       if (data.currentTrack) {
-        useQueueStore.getState().setCurrentTrack(data.currentTrack);
-        if (data.currentTrack.duration) setDuration(data.currentTrack.duration);
+        const prevTrack = useQueueStore.getState().currentTrack;
+        if (prevTrack?.id !== data.currentTrack.id) {
+          useQueueStore.getState().setCurrentTrack(data.currentTrack);
+          if (data.currentTrack.duration) setDuration(data.currentTrack.duration);
+
+          const mId = data.currentTrack.musicVideoId || (data.currentTrack as any).music_video_id;
+          const vId = data.currentTrack.videoId || (data.currentTrack as any).video_id;
+          const nextTarget = isVideoMode && mId ? mId : (mId || vId);
+
+          if (nextTarget && currentActiveVideoIdRef.current !== nextTarget) {
+            currentActiveVideoIdRef.current = nextTarget;
+            loadVideo(nextTarget, data.playbackPosition);
+            if (data.playbackState === 'playing') play();
+            return;
+          }
+        }
       }
 
       const rttSec = data.clientSendTime ? Math.max(0, (Date.now() - data.clientSendTime) / 2000) : 0;
@@ -220,7 +273,7 @@ export function Player() {
       const localTime = getCurrentTime();
       const drift = Math.abs(localTime - targetPos);
 
-      if (drift > 2) {
+      if (drift > 1.2) {
         seekTo(targetPos);
         setCurrentTime(targetPos);
       } else {
@@ -245,6 +298,7 @@ export function Player() {
     socket.on(SOCKET_EVENTS.TRACK_CHANGED, onTrackChanged);
     socket.on(SOCKET_EVENTS.VIDEO_MODE_CHANGED, onVideoModeChanged);
     socket.on(SOCKET_EVENTS.SYNC_STATE, onSyncState);
+    socket.on('sync_tick', onSyncTick);
 
     return () => {
       socket.off(SOCKET_EVENTS.PLAYBACK_STATE, onPlaybackState);
@@ -252,6 +306,7 @@ export function Player() {
       socket.off(SOCKET_EVENTS.TRACK_CHANGED, onTrackChanged);
       socket.off(SOCKET_EVENTS.VIDEO_MODE_CHANGED, onVideoModeChanged);
       socket.off(SOCKET_EVENTS.SYNC_STATE, onSyncState);
+      socket.off('sync_tick', onSyncTick);
     };
   }, [
     socket,

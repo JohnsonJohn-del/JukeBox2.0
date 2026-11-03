@@ -28,7 +28,7 @@ import {
   ChatPanel,
 } from '@/components/room';
 import { FooterPlayerControls } from '@/components/room/FooterPlayerControls';
-import { Button } from '@/components/ui';
+import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn, getThumbnailUrl } from '@/lib/utils';
 
@@ -61,6 +61,8 @@ export default function RoomPage() {
   const [showMobileQueue, setShowMobileQueue] = useState(false);
   const [socketError, setSocketError] = useState<string | null>(null);
   const [activeRightTab, setActiveRightTab] = useState<'queue' | 'chat'>('queue');
+  const [roomClosedModalOpen, setRoomClosedModalOpen] = useState(false);
+  const [roomClosedMessage, setRoomClosedMessage] = useState('The host has ended this room session.');
   const unreadCount = useChatStore((s) => s.unreadCount);
 
   const { colors: themeColors } = useThemeColors(getThumbnailUrl(currentTrack));
@@ -146,9 +148,12 @@ export default function RoomPage() {
   }, [roomId, setRoom, setMembers, setIsHost, user?.id]);
 
   useEffect(() => {
-    function onRoomClosed() {
-      leaveRoomStore();
-      router.push('/');
+    function onRoomClosed(data?: { message?: string }) {
+      if (data?.message) setRoomClosedMessage(data.message);
+      setRoomClosedModalOpen(true);
+      try {
+        usePlayerStore.getState().playerControls?.pause();
+      } catch {}
     }
 
     socket.on(SOCKET_EVENTS.ROOM_CLOSED, onRoomClosed);
@@ -156,7 +161,7 @@ export default function RoomPage() {
     return () => {
       socket.off(SOCKET_EVENTS.ROOM_CLOSED, onRoomClosed);
     };
-  }, [router, leaveRoomStore]);
+  }, []);
 
   const thumbnailUrl = getThumbnailUrl(currentTrack);
 
@@ -572,6 +577,32 @@ export default function RoomPage() {
           </button>
         </div>
       </div>
+
+      {/* Room Closed Popup Modal for all joined members */}
+      <Dialog open={roomClosedModalOpen} onOpenChange={() => {}}>
+        <DialogContent className="bg-[#14121a] border-2 border-amber-500/40 text-white max-w-md p-6 text-center shadow-2xl rounded-2xl">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.2)]">
+            <Radio className="h-8 w-8 text-amber-400 animate-pulse" />
+          </div>
+          <DialogTitle className="text-2xl font-black uppercase text-amber-300 tracking-wider">
+            Room Ended
+          </DialogTitle>
+          <DialogDescription className="text-white/80 mt-2 text-sm leading-relaxed">
+            {roomClosedMessage}
+          </DialogDescription>
+          <div className="mt-6 flex flex-col gap-2">
+            <Button
+              onClick={() => {
+                leaveRoomStore();
+                router.push('/');
+              }}
+              className="w-full bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-black font-black uppercase tracking-wider py-3 rounded-xl shadow-lg cursor-pointer"
+            >
+              Return to Lobby
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

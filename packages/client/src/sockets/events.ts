@@ -11,6 +11,7 @@ export const SOCKET_EVENTS = {
   USER_LEFT: 'user_left',
   HOST_CHANGED: 'host_changed',
   ROOM_CLOSED: 'room_closed',
+  CLOSE_ROOM: 'close_room',
   // Playback events
   PLAY: 'play',
   PAUSE: 'pause',
@@ -21,6 +22,7 @@ export const SOCKET_EVENTS = {
   SEEKED: 'seeked',
   TRACK_CHANGED: 'track_changed',
   SYNC_STATE: 'sync_state',
+  SYNC_TICK: 'sync_tick',
   REQUEST_SYNC: 'request_sync',
   TOGGLE_VIDEO_MODE: 'toggle_video_mode',
   VIDEO_MODE_CHANGED: 'video_mode_changed',

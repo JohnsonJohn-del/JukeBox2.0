@@ -32,6 +32,7 @@ export function HostControls({ className }: { className?: string }) {
 
   const handleEndRoom = useCallback(() => {
     if (room?.id) {
+      socket.emit('close_room', { roomId: room.id });
       socket.emit(SOCKET_EVENTS.LEAVE_ROOM, { roomId: room.id, endRoom: true });
     }
     leaveRoom();

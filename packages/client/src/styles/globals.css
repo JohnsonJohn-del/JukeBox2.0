@@ -295,7 +295,7 @@
 
 .jukebox-arch-frame {
   position: relative;
-  border-radius: 999px 999px 32px 32px;
+  border-radius: 44px 44px 32px 32px;
   border: 2px solid rgba(214, 168, 79, 0.72);
   background:
     linear-gradient(180deg, rgba(255, 211, 106, 0.12), rgba(177, 18, 38, 0.08)),
