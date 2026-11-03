@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Play, Pause, Volume2, VolumeX, Video, Tv, Film } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Video, Tv, Film } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useSocket } from '@/hooks/useSocket';
 import { usePlayer } from '@/hooks/usePlayer';
@@ -68,6 +68,22 @@ export function FooterPlayerControls() {
     }
   }, [currentTrack, isPlaying, pause, play, socket, room?.id, currentTime]);
 
+  const handlePrevious = useCallback(() => {
+    if (!isHost) {
+      toast('Only the room host can change tracks', { icon: '🔒' });
+      return;
+    }
+    socket.emit(SOCKET_EVENTS.PREVIOUS_TRACK, { roomId: room?.id });
+  }, [isHost, socket, room?.id]);
+
+  const handleNext = useCallback(() => {
+    if (!isHost) {
+      toast('Only the room host can skip tracks', { icon: '🔒' });
+      return;
+    }
+    socket.emit(SOCKET_EVENTS.NEXT_TRACK, { roomId: room?.id });
+  }, [isHost, socket, room?.id]);
+
   const handleToggleVideoMode = useCallback(() => {
     if (!currentTrack) return;
 
@@ -126,14 +142,14 @@ export function FooterPlayerControls() {
     return (
       <div className="flex min-w-0 flex-1 items-center justify-center">
         <p className="font-button text-[10px] font-black uppercase tracking-[0.28em] text-jukebox-gold/45">
-          Add a song to activate footer controls
+          Add a song from YouTube Music to activate player
         </p>
       </div>
     );
   }
 
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-4">
+    <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
       <Button
         variant="ghost"
         size="icon"
@@ -143,22 +159,47 @@ export function FooterPlayerControls() {
         {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
       </Button>
 
-      <motion.button
-        whileTap={{ scale: 0.92 }}
-        onClick={handlePlayPause}
-        className="jukebox-chrome-button flex h-14 w-14 shrink-0 items-center justify-center rounded-full"
-      >
-        {isPlaying ? (
-          <Pause className="h-6 w-6 text-jukebox-black" />
-        ) : (
-          <Play className="ml-0.5 h-6 w-6 text-jukebox-black" />
-        )}
-      </motion.button>
+      {/* Playback Transport Buttons */}
+      <div className="flex items-center gap-1 sm:gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handlePrevious}
+          disabled={!isHost}
+          className="h-9 w-9 shrink-0 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold/80 hover:bg-jukebox-gold/10 hover:text-jukebox-cream disabled:opacity-30"
+          title={isHost ? "Previous Track" : "Only host can control playback"}
+        >
+          <SkipBack className="h-4 w-4" />
+        </Button>
+
+        <motion.button
+          whileTap={{ scale: 0.92 }}
+          onClick={handlePlayPause}
+          className="jukebox-chrome-button flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-full"
+        >
+          {isPlaying ? (
+            <Pause className="h-5 w-5 sm:h-6 sm:w-6 text-jukebox-black" />
+          ) : (
+            <Play className="ml-0.5 h-5 w-5 sm:h-6 sm:w-6 text-jukebox-black" />
+          )}
+        </motion.button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleNext}
+          disabled={!isHost}
+          className="h-9 w-9 shrink-0 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold/80 hover:bg-jukebox-gold/10 hover:text-jukebox-cream disabled:opacity-30"
+          title={isHost ? "Next Track" : "Only host can control playback"}
+        >
+          <SkipForward className="h-4 w-4" />
+        </Button>
+      </div>
 
       <div className="min-w-0 flex-1">
         <div className="mb-2 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="relative max-w-[220px] overflow-hidden whitespace-nowrap sm:max-w-[280px] xl:max-w-[360px]">
+            <div className="relative max-w-[180px] overflow-hidden whitespace-nowrap sm:max-w-[280px] xl:max-w-[360px]">
               <motion.p
                 key={currentTrack.title}
                 initial={{ x: '0%' }}
@@ -180,43 +221,41 @@ export function FooterPlayerControls() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Video Mode toggle button in footer */}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleToggleVideoMode}
-              disabled={!isHost && !isVideoMode}
-              className={`h-7 rounded-full px-2.5 text-[10px] font-bold transition-all ${
-                isVideoMode
-                  ? 'border-red-500/50 bg-red-600/20 text-red-400 hover:bg-red-600/30'
-                  : trackHasVideoCounterpart
-                  ? 'border-jukebox-gold/30 bg-black/40 text-jukebox-gold hover:bg-jukebox-gold/15'
-                  : 'border-white/10 bg-white/5 text-gray-500 opacity-60'
-              }`}
-              title={
-                !trackHasVideoCounterpart
-                  ? 'No video counterpart on YouTube Music'
-                  : !isHost
-                  ? 'Host controls Video Mode'
-                  : isVideoMode
-                  ? 'Switch to Audio'
-                  : 'Switch to Video'
-              }
-            >
-              {isVideoMode ? (
-                <>
-                  <Tv className="mr-1 h-3 w-3 animate-pulse text-red-400" />
-                  Video ON
-                </>
-              ) : (
-                <>
-                  <Video className="mr-1 h-3 w-3" />
-                  {trackHasVideoCounterpart ? 'Video Avail' : 'Audio Only'}
-                </>
-              )}
-            </Button>
+            {/* YouTube Music [ Song | Video ] Toggle in Footer */}
+            <div className="flex items-center rounded-full bg-black/60 p-0.5 border border-white/10">
+              <button
+                onClick={() => isVideoMode && handleToggleVideoMode()}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
+                  !isVideoMode
+                    ? 'bg-jukebox-gold text-black shadow-sm font-black'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                Song
+              </button>
+              <button
+                onClick={() => !isVideoMode && handleToggleVideoMode()}
+                disabled={!trackHasVideoCounterpart && !isVideoMode}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
+                  isVideoMode
+                    ? 'bg-red-600 text-white shadow-sm font-black'
+                    : trackHasVideoCounterpart
+                    ? 'text-white/60 hover:text-white cursor-pointer'
+                    : 'text-white/20 cursor-not-allowed opacity-40'
+                }`}
+                title={
+                  !trackHasVideoCounterpart
+                    ? 'No official video counterpart available on YouTube Music'
+                    : !isHost
+                    ? 'Only host can toggle video mode'
+                    : 'Switch to Video Mode'
+                }
+              >
+                Video
+              </button>
+            </div>
 
-            <div className="font-button flex shrink-0 items-center gap-2 text-[10px] font-black tracking-widest text-jukebox-cream/45">
+            <div className="font-button hidden sm:flex shrink-0 items-center gap-2 text-[10px] font-black tracking-widest text-jukebox-cream/45">
               <span>{formatTime(currentTime)}</span>
               <span>/</span>
               <span>{formatTime(duration)}</span>
@@ -238,9 +277,7 @@ export function FooterPlayerControls() {
 
           <div
             className="absolute top-1/2 h-5 w-5 -translate-y-1/2 rounded-full border border-jukebox-gold/70 bg-jukebox-cream opacity-0 shadow-jukebox-gold transition-opacity group-hover:opacity-100"
-            style={{
-              left: `calc(${progress}% - 10px)`,
-            }}
+            style={{ left: `calc(${progress}% - 10px)` }}
           />
         </div>
       </div>

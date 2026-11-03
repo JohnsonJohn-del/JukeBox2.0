@@ -77,7 +77,6 @@ async function verifyIsHost(roomId: string, userId: string): Promise<boolean> {
 
     return room?.host_id === userId
   } catch {
-    // If DB check fails or in development without DB, default to true for creator
     return true
   }
 }
@@ -112,10 +111,12 @@ export function registerPlaybackHandlers(
 
         if (nextTrack) {
           io.to(roomId).emit('track_changed', { track: nextTrack })
+          const queue = await queueService.getQueue(roomId)
+          io.to(roomId).emit('queue_updated', { queue })
         }
       }
 
-      socket.to(roomId).emit('playback_state', {
+      io.to(roomId).emit('playback_state', {
         state: 'playing',
         position: state.playbackPosition,
         track: state.currentTrack,
@@ -139,12 +140,12 @@ export function registerPlaybackHandlers(
 
       const state = getOrCreatePlaybackState(roomId)
       state.playbackState = 'paused'
-      state.playbackPosition = position
+      state.playbackPosition = position !== undefined ? position : state.playbackPosition
       state.playbackStartTime = null
 
-      socket.to(roomId).emit('playback_state', {
+      io.to(roomId).emit('playback_state', {
         state: 'paused',
-        position,
+        position: state.playbackPosition,
         track: state.currentTrack,
         isVideoMode: state.isVideoMode,
       })
@@ -232,25 +233,58 @@ export function registerPlaybackHandlers(
       state.playbackPosition = 0
       state.playbackStartTime = nextTrack ? Date.now() : null
 
-      if (nextTrack) {
-        io.to(roomId).emit('track_changed', { track: nextTrack })
+      io.to(roomId).emit('track_changed', { track: nextTrack })
 
+      io.to(roomId).emit('playback_state', {
+        state: state.playbackState,
+        position: 0,
+        track: nextTrack,
+        isVideoMode: state.isVideoMode,
+      })
+
+      const queue = await queueService.getQueue(roomId)
+      io.to(roomId).emit('queue_updated', { queue })
+    } catch (error: any) {
+      socket.emit('error', { message: error.message || 'Failed to skip track', code: 'SKIP_ERROR' })
+    }
+  })
+
+  socket.on('previous_track' as any, async (payload: any) => {
+    try {
+      const userId = socket.data.userId
+      const { roomId } = payload
+
+      const isHost = await verifyIsHost(roomId, userId)
+      if (!isHost) {
+        socket.emit('error', { message: 'Only the host can change tracks', code: 'NOT_HOST' })
+        return
+      }
+
+      const state = getOrCreatePlaybackState(roomId)
+      const prevTrack = await queueService.getPreviousTrack(roomId, state.currentTrack?.id)
+
+      if (prevTrack) {
+        state.currentTrack = prevTrack
+        state.playbackState = 'playing'
+        state.playbackPosition = 0
+        state.playbackStartTime = Date.now()
+
+        io.to(roomId).emit('track_changed', { track: prevTrack })
         io.to(roomId).emit('playback_state', {
           state: 'playing',
           position: 0,
-          track: nextTrack,
+          track: prevTrack,
           isVideoMode: state.isVideoMode,
         })
+        const queue = await queueService.getQueue(roomId)
+        io.to(roomId).emit('queue_updated', { queue })
       } else {
-        io.to(roomId).emit('playback_state', {
-          state: 'stopped',
-          position: 0,
-          track: null,
-          isVideoMode: state.isVideoMode,
-        })
+        state.playbackPosition = 0
+        state.playbackStartTime = state.playbackState === 'playing' ? Date.now() : null
+        io.to(roomId).emit('seeked', { position: 0 })
       }
     } catch (error: any) {
-      socket.emit('error', { message: error.message || 'Failed to skip track', code: 'SKIP_ERROR' })
+      socket.emit('error', { message: error.message || 'Previous track failed', code: 'PREV_ERROR' })
     }
   })
 

@@ -16,6 +16,7 @@ export const SOCKET_EVENTS = {
   PAUSE: 'pause',
   SEEK: 'seek',
   NEXT_TRACK: 'next_track',
+  PREVIOUS_TRACK: 'previous_track',
   PLAYBACK_STATE: 'playback_state',
   SEEKED: 'seeked',
   TRACK_CHANGED: 'track_changed',

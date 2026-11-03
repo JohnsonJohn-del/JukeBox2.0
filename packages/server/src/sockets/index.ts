@@ -13,7 +13,9 @@ let io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, So
 export function setupSocket(httpServer: HttpServer): Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData> {
   io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(httpServer, {
     cors: {
-      origin: config.cors.origin,
+      origin: (origin, callback) => {
+        callback(null, true)
+      },
       methods: ['GET', 'POST'],
       credentials: true,
     },
@@ -52,7 +54,6 @@ export function setupSocket(httpServer: HttpServer): Server<ClientToServerEvents
       const roomId = socket.data.roomId
       if (roomId) {
         try {
-          
           const roomData = await getRoom(roomId)
           if (roomData.room) {
             const member = roomData.members.find((m: any) => m.user_id === userId)

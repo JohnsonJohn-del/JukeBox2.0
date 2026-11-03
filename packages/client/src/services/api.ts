@@ -5,11 +5,16 @@ import toast from 'react-hot-toast';
 interface ApiResponse<T = unknown> {
   data: T;
   message?: string;
+  success?: boolean;
 }
 
 interface ApiError {
-  message: string;
-  statusCode: number;
+  message?: string;
+  statusCode?: number;
+  error?: {
+    message?: string;
+    code?: string;
+  };
 }
 
 function snakeToCamel(str: string): string {
@@ -61,18 +66,46 @@ class ApiClient {
         body: body ? JSON.stringify(body) : undefined,
       });
 
-      const json: ApiResponse<T> & ApiError = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      let json: (ApiResponse<T> & ApiError) | null = null;
+
+      if (contentType.includes('application/json')) {
+        try {
+          json = await response.json();
+        } catch {
+          json = null;
+        }
+      }
 
       if (!response.ok) {
-        const errorMessage = json.message || `Request failed with status ${response.status}`;
+        let errorMessage = json?.message || json?.error?.message;
+        if (!errorMessage) {
+          if (response.status === 502 || response.status === 503 || response.status === 504) {
+            errorMessage = 'Backend server is unreachable via tunnel. Please ensure your local server and Cloudflare tunnel are active.';
+          } else {
+            const rawText = !json ? await response.text().catch(() => '') : '';
+            errorMessage = `Request failed (${response.status}): ${rawText.slice(0, 100) || response.statusText || 'Unknown error'}`;
+          }
+        }
         toast.error(errorMessage);
         throw new Error(errorMessage);
       }
 
-      return transformKeys<T>(json.data);
+      if (!json) {
+        const rawText = await response.text().catch(() => '');
+        throw new Error(`Invalid response format from server (${contentType || 'non-JSON'}): ${rawText.slice(0, 100)}`);
+      }
+
+      if ((json as any).success === false && json.error?.message) {
+        toast.error(json.error.message);
+        throw new Error(json.error.message);
+      }
+
+      const payload = json.data !== undefined ? json.data : json;
+      return transformKeys<T>(payload as T);
     } catch (error) {
       if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        const networkMsg = 'Network error. Please check your connection.';
+        const networkMsg = 'Network error. Could not connect to backend server.';
         toast.error(networkMsg);
         throw new Error(networkMsg);
       }

@@ -70,7 +70,7 @@ export async function addSong(
 
   const { data: room } = await db
     .from('rooms')
-    .select('id, is_active')
+    .select('id, is_active, host_id')
     .eq('id', roomId)
     .maybeSingle()
 
@@ -94,7 +94,10 @@ export async function addSong(
     throw new AppError('This song is already in the queue', 409, 'DUPLICATE_SONG')
   }
 
-  checkCooldown(roomId, userId)
+  const isHost = room.host_id === userId
+  if (!isHost) {
+    checkCooldown(roomId, userId)
+  }
 
   const { data: maxPosition } = await db
     .from('queue_items')
@@ -147,7 +150,7 @@ export async function removeSong(
 
   const { data: room } = await db
     .from('rooms')
-    .select('id, is_active')
+    .select('id, is_active, host_id')
     .eq('id', roomId)
     .maybeSingle()
 
@@ -332,4 +335,61 @@ async function renumberPositions(roomId: string): Promise<void> {
       }
     }
   }
+}
+
+export async function getPreviousTrack(roomId: string, currentTrackId?: string): Promise<QueueItem | null> {
+  const db = getDbClient()
+
+  const { data: playedTracks } = await db
+    .from('queue_items')
+    .select('*')
+    .eq('room_id', roomId)
+    .eq('is_played', true)
+    .order('position', { ascending: false })
+
+  if (!playedTracks || playedTracks.length === 0) return null
+
+  let candidate = playedTracks[0]
+  if (currentTrackId && candidate.id === currentTrackId && playedTracks.length > 1) {
+    candidate = playedTracks[1]
+  }
+
+  if (currentTrackId && candidate.id !== currentTrackId) {
+    await db
+      .from('queue_items')
+      .update({ is_played: false, position: 0 })
+      .eq('id', currentTrackId)
+  }
+
+  await db
+    .from('queue_items')
+    .update({ is_played: true })
+    .eq('id', candidate.id)
+
+  return candidate
+}
+
+export async function reorderQueueBatch(
+  roomId: string,
+  items: Array<{ id: string; position: number }>,
+  userId: string
+): Promise<QueueItem[]> {
+  const db = getDbClient()
+
+  for (const item of items) {
+    await db
+      .from('queue_items')
+      .update({ position: item.position })
+      .eq('id', item.id)
+      .eq('room_id', roomId)
+  }
+
+  const { data: updatedQueue } = await db
+    .from('queue_items')
+    .select('*')
+    .eq('room_id', roomId)
+    .eq('is_played', false)
+    .order('position', { ascending: true })
+
+  return updatedQueue || []
 }

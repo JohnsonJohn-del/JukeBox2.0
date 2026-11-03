@@ -3,6 +3,7 @@ import * as roomService from '../services/room.service'
 import * as authService from '../services/auth.service'
 import { generateToken } from '../utils/jwt'
 import { SocketData, ClientToServerEvents, ServerToClientEvents, InterServerEvents } from '../types/socket'
+import { getPlaybackState } from './playback.socket'
 
 export function registerRoomHandlers(
   io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
@@ -63,6 +64,18 @@ export function registerRoomHandlers(
         roomCode: room.room_code,
         members: roomData.members,
         queue: roomData.queue,
+      })
+
+      // Send current playback and track state to the joining user
+      const playback = getPlaybackState(room.id)
+      if (playback.currentTrack) {
+        socket.emit('track_changed', { track: playback.currentTrack })
+      }
+      socket.emit('playback_state', {
+        state: playback.playbackState,
+        position: playback.playbackPosition,
+        track: playback.currentTrack,
+        isVideoMode: playback.isVideoMode,
       })
 
       socket.to(room.id).emit('user_joined', {
@@ -151,6 +164,17 @@ export function registerRoomHandlers(
         roomCode: roomData.room.room_code,
         members: roomData.members,
         queue: roomData.queue,
+      })
+
+      const playback = getPlaybackState(roomId)
+      if (playback.currentTrack) {
+        socket.emit('track_changed', { track: playback.currentTrack })
+      }
+      socket.emit('playback_state', {
+        state: playback.playbackState,
+        position: playback.playbackPosition,
+        track: playback.currentTrack,
+        isVideoMode: playback.isVideoMode,
       })
     } catch (error: any) {
       socket.emit('error', { message: error.message || 'Failed to rejoin room', code: 'REJOIN_FAILED' })

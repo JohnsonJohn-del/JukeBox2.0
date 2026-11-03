@@ -17,14 +17,15 @@ async function main(): Promise<void> {
 
   const io = setupSocket(httpServer)
 
-  httpServer.listen(config.port, () => {
+  httpServer.listen(config.port, '0.0.0.0', () => {
     console.log(`
 ╔══════════════════════════════════════════╗
 ║          Jukebox Server v1.0.0           ║
 ║──────────────────────────────────────────║
 ║  Port:        ${String(config.port).padEnd(27)}║
+║  Host:        ${'0.0.0.0'.padEnd(27)}║
 ║  Environment: ${config.nodeEnv.padEnd(27)}║
-║  CORS Origin: ${config.cors.origin.padEnd(26)}║
+║  CORS Origin: ${'Universal (Dynamic)'.padEnd(27)}║
 ║  Socket.IO:   ${'Enabled'.padEnd(27)}║
 ╚══════════════════════════════════════════╝
     `)

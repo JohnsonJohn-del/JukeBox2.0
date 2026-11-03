@@ -6,13 +6,13 @@ import {
   Play,
   Pause,
   SkipForward,
+  SkipBack,
   Volume2,
   VolumeX,
   Music,
   Disc3,
   Sparkles,
   Video,
-  VideoOff,
   Tv,
   Film,
   AlertCircle,
@@ -61,7 +61,7 @@ export function Player() {
     console.warn('[Player] YouTube error received:', errorCode);
     // Error 101 or 150 = embedding restricted by owner
     if (errorCode === 101 || errorCode === 150) {
-      toast.error('Music video embedding restricted by label. Switching back to Audio Mode.', {
+      toast.error('Music video embedding restricted by copyright holder. Switching back to Audio Mode.', {
         duration: 4000,
         icon: '⚠️',
       });
@@ -131,6 +131,12 @@ export function Player() {
       if (data.isVideoMode !== undefined) {
         setIsVideoMode(data.isVideoMode);
         setVideoMode(data.isVideoMode);
+      }
+
+      if (data.state === 'playing') {
+        play();
+      } else if (data.state === 'paused') {
+        pause();
       }
     }
 
@@ -215,6 +221,7 @@ export function Player() {
     setVideoMode,
     loadVideo,
     play,
+    pause,
     getCurrentTime,
     isVideoMode,
     currentTrack,
@@ -224,21 +231,24 @@ export function Player() {
 
   const handleEnablePlayback = useCallback(() => {
     setUserInteracted(true);
+    unMutePlayer();
 
     if (currentTrack) {
       const targetId = isVideoMode && currentTrack.hasVideo && currentTrack.musicVideoId
         ? currentTrack.musicVideoId
         : ((currentTrack as any).videoId || (currentTrack as any).video_id);
 
-      if (targetId && isReady) {
+      if (targetId) {
         currentActiveVideoIdRef.current = targetId;
         loadVideo(targetId, currentTime);
         play();
-      } else if (targetId) {
-        loadVideo(targetId, currentTime);
       }
     }
-  }, [currentTrack, isVideoMode, isReady, loadVideo, play, currentTime]);
+
+    if (isHost && room?.id) {
+      socket.emit(SOCKET_EVENTS.PLAY, { roomId: room.id, position: currentTime || 0 });
+    }
+  }, [currentTrack, isVideoMode, loadVideo, play, currentTime, unMutePlayer, isHost, room?.id, socket]);
 
   const handlePlayPause = useCallback(() => {
     if (!userInteracted) {
@@ -250,10 +260,11 @@ export function Player() {
       pause();
       socket.emit(SOCKET_EVENTS.PAUSE, { roomId: room?.id, position: currentTime });
     } else {
+      unMutePlayer();
       play();
       socket.emit(SOCKET_EVENTS.PLAY, { roomId: room?.id, position: currentTime });
     }
-  }, [playbackState, pause, play, socket, room?.id, currentTime, userInteracted, handleEnablePlayback]);
+  }, [playbackState, pause, play, socket, room?.id, currentTime, userInteracted, handleEnablePlayback, unMutePlayer]);
 
   const handleToggleVideoMode = useCallback(() => {
     if (!currentTrack) return;
@@ -278,10 +289,8 @@ export function Player() {
     setIsVideoMode(nextMode);
     setVideoMode(nextMode);
 
-    // Switch video source
     syncTrackVideoSource(currentTrack, nextMode, currentTime);
 
-    // Broadcast to room
     socket.emit(SOCKET_EVENTS.TOGGLE_VIDEO_MODE, {
       roomId: room?.id,
       isVideoMode: nextMode,
@@ -315,6 +324,11 @@ export function Player() {
     },
     [duration],
   );
+
+  const handlePrevious = useCallback(() => {
+    if (!isHost) return;
+    socket.emit(SOCKET_EVENTS.PREVIOUS_TRACK, { roomId: room?.id });
+  }, [isHost, socket, room?.id]);
 
   const handleSkip = useCallback(() => {
     if (!isHost) return;
@@ -359,7 +373,7 @@ export function Player() {
           </h2>
 
           <p className="font-body mt-3 max-w-sm text-lg leading-6 text-jukebox-cream/55">
-            Search YouTube Music to light up the jukebox. Official music videos switch automatically!
+            Search YouTube Music to queue official tracks. Seamlessly switch between Album Art and Official Music Videos!
           </p>
         </div>
       </motion.div>
@@ -387,7 +401,7 @@ export function Player() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="absolute inset-0 z-50 flex cursor-pointer items-center justify-center bg-black/75 p-4 backdrop-blur-md"
+          className="absolute inset-0 z-50 flex cursor-pointer items-center justify-center bg-black/80 p-4 backdrop-blur-md"
           onClick={handleEnablePlayback}
         >
           <motion.div
@@ -403,7 +417,7 @@ export function Player() {
             </p>
 
             <h3 className="font-heading mt-2 text-xl font-black uppercase heading-tracking text-jukebox-cream">
-              Tap to Start Audio / Video
+              Tap to Start Playback
             </h3>
 
             <p className="font-body mt-2 text-sm leading-5 text-jukebox-cream/65">
@@ -414,64 +428,65 @@ export function Player() {
       )}
 
       <div className="relative flex w-full max-w-[800px] flex-col items-center">
-        {/* Top YouTube Music & Video Mode Toggle Bar */}
-        <div className="mb-4 flex w-full max-w-[640px] items-center justify-between px-2">
+        {/* Native YouTube Music [ Song | Video ] Toggle Pill Bar */}
+        <div className="mb-4 flex flex-col sm:flex-row items-center justify-between gap-3 w-full max-w-[640px] px-2">
           <div className="flex items-center gap-2">
             <span className="flex h-6 items-center gap-1.5 rounded-full border border-red-500/40 bg-red-950/40 px-2.5 text-[10px] font-bold uppercase tracking-wider text-red-400">
               <Film className="h-3 w-3 text-red-500" />
               YouTube Music
             </span>
             {trackHasVideoCounterpart ? (
-              <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-cyan-500/30 bg-cyan-950/30 px-2.5 py-0.5 text-[10px] font-medium text-cyan-300">
+              <span className="inline-flex items-center gap-1 rounded-full border border-cyan-500/30 bg-cyan-950/30 px-2.5 py-0.5 text-[10px] font-medium text-cyan-300">
                 <Sparkles className="h-3 w-3 text-cyan-400" />
-                Official Music Video Available
+                Music Video Available
               </span>
             ) : (
-              <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-yellow-500/20 bg-yellow-950/20 px-2.5 py-0.5 text-[10px] font-medium text-yellow-300/70">
+              <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/20 bg-yellow-950/20 px-2.5 py-0.5 text-[10px] font-medium text-yellow-300/70">
                 Official Audio Only
               </span>
             )}
           </div>
 
-          {/* Video / Audio Mode Switch Button */}
-          <Button
-            size="sm"
-            onClick={handleToggleVideoMode}
-            disabled={!isHost && !isVideoMode}
-            className={`h-8 rounded-full px-3.5 text-xs font-bold transition-all shadow-md ${
-              isVideoMode
-                ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-red-500/25 hover:brightness-110'
-                : trackHasVideoCounterpart
-                ? 'border border-jukebox-gold/40 bg-black/60 text-jukebox-gold hover:bg-jukebox-gold/15'
-                : 'border border-white/10 bg-white/5 text-gray-400 opacity-60 cursor-not-allowed'
-            }`}
-            title={
-              !trackHasVideoCounterpart
-                ? 'No official video counterpart available on YouTube Music'
-                : !isHost
-                ? 'Only the room host can switch Video Mode'
-                : isVideoMode
-                ? 'Switch to Audio Mode'
-                : 'Switch to Official Video Mode'
-            }
-          >
-            {isVideoMode ? (
-              <>
-                <Tv className="mr-1.5 h-3.5 w-3.5 animate-pulse" />
-                Video Mode ON
-              </>
-            ) : (
-              <>
-                <Video className="mr-1.5 h-3.5 w-3.5" />
-                Switch to Video
-              </>
-            )}
-          </Button>
+          {/* YouTube Music Native [ Song | Video ] Segmented Control */}
+          <div className="flex items-center rounded-full bg-[#1e1e1e] p-1 border border-white/10 shadow-lg">
+            <button
+              onClick={() => isVideoMode && handleToggleVideoMode()}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                !isVideoMode
+                  ? 'bg-white text-black shadow-md'
+                  : 'text-white/70 hover:text-white'
+              }`}
+            >
+              <Music className="h-3.5 w-3.5" />
+              Song
+            </button>
+            <button
+              onClick={() => !isVideoMode && handleToggleVideoMode()}
+              disabled={!trackHasVideoCounterpart && !isVideoMode}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+                isVideoMode
+                  ? 'bg-white text-black shadow-md'
+                  : trackHasVideoCounterpart
+                  ? 'text-white/70 hover:text-white cursor-pointer'
+                  : 'text-white/25 cursor-not-allowed opacity-50'
+              }`}
+              title={
+                !trackHasVideoCounterpart
+                  ? 'No official video counterpart available on YouTube Music'
+                  : !isHost
+                  ? 'Only host can toggle Video Mode'
+                  : 'Switch to Official Music Video'
+              }
+            >
+              <Film className="h-3.5 w-3.5" />
+              Video
+            </button>
+          </div>
         </div>
 
         {/* Central Viewport Box */}
-        <div className="jukebox-arch-frame relative w-full overflow-hidden px-4 pb-6 pt-10 sm:px-8 lg:px-10">
-          <div className="absolute left-1/2 top-4 h-2.5 w-36 -translate-x-1/2 rounded-full jukebox-tube-gold" />
+        <div className="jukebox-arch-frame relative w-full overflow-hidden px-4 pb-6 pt-6 sm:px-8 lg:px-10">
+          <div className="absolute left-1/2 top-3 h-2.5 w-36 -translate-x-1/2 rounded-full jukebox-tube-gold" />
 
           {/* Active Cinema / Jukebox Viewport */}
           <div className="relative mx-auto mt-2 w-full max-w-[640px]">
@@ -495,7 +510,7 @@ export function Player() {
                 boxShadow: `0 0 38px var(--player-glow), 0 0 80px rgba(0,0,0,0.8)`,
               }}
             >
-              {/* YouTube IFrame Player Container */}
+              {/* YouTube IFrame Player Container (Visible in Video Mode) */}
               <div
                 className={`w-full h-full transition-opacity duration-300 ${
                   isVideoMode ? 'opacity-100 z-20 relative' : 'opacity-0 pointer-events-none absolute inset-0 -z-10'
@@ -504,92 +519,71 @@ export function Player() {
                 <div id="youtube-player-element" className="w-full h-full" />
               </div>
 
-              {/* Audio Mode Jukebox Visualizer (Displayed when not in Video Mode) */}
+              {/* YouTube Music Song Mode: High-Res Square Album Art View */}
               {!isVideoMode && (
-                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-black/40 via-black/80 to-black">
-                  <motion.img
-                    key={(currentTrack as any).videoId || (currentTrack as any).video_id}
-                    initial={{ opacity: 0, scale: 0.94 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.4 }}
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-[#181818]/60 via-[#121212]/90 to-[#0a0a0a]">
+                  {/* Subtle Blurred Background Glow */}
+                  <img
                     src={thumbnailUrl}
                     alt={currentTrack.title}
-                    className="absolute inset-0 h-full w-full object-cover opacity-25 blur-md"
+                    className="absolute inset-0 h-full w-full object-cover opacity-20 blur-xl scale-110"
                   />
 
-                  {/* Spinning Vinyl Record with Album Art Center */}
-                  <div className="relative z-10 flex items-center justify-center">
+                  {/* Centered Square Artwork (YouTube Music Native Look) */}
+                  <div className="relative z-10 flex flex-col items-center">
                     <motion.div
-                      animate={{ rotate: isPlaying ? 360 : 0 }}
-                      transition={{
-                        repeat: Infinity,
-                        duration: 8,
-                        ease: 'linear',
-                      }}
-                      className="relative flex h-40 w-40 sm:h-52 sm:w-52 items-center justify-center rounded-full border-4 border-[#222] bg-[#111] shadow-2xl shadow-black ring-1 ring-jukebox-gold/30"
+                      initial={{ scale: 0.95, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ duration: 0.3 }}
+                      className="relative h-44 w-44 sm:h-56 sm:w-56 md:h-64 md:w-64 overflow-hidden rounded-2xl shadow-2xl border border-white/10 ring-1 ring-white/10"
                     >
-                      {/* Grooves */}
-                      <div className="absolute inset-3 rounded-full border border-white/5" />
-                      <div className="absolute inset-6 rounded-full border border-white/5" />
-                      <div className="absolute inset-9 rounded-full border border-white/5" />
-
-                      {/* Center Album Artwork */}
-                      <div className="relative h-20 w-20 sm:h-24 sm:w-24 overflow-hidden rounded-full border-2 border-jukebox-gold/60 shadow-inner">
-                        <img
-                          src={thumbnailUrl}
-                          alt={currentTrack.title}
-                          className="h-full w-full object-cover"
-                        />
-                        <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-black/40 to-transparent" />
-                        <div className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/30 bg-black" />
-                      </div>
+                      <img
+                        src={thumbnailUrl}
+                        alt={currentTrack.title}
+                        className="h-full w-full object-cover"
+                      />
                     </motion.div>
+
+                    <div className="mt-3 text-center px-4 max-w-sm">
+                      <h4 className="font-heading truncate text-base font-bold text-white">
+                        {currentTrack.title}
+                      </h4>
+                      <p className="font-body truncate text-xs text-white/60">
+                        {currentTrack.artist}
+                      </p>
+                    </div>
                   </div>
 
-                  {/* Audio Mode Badge */}
-                  <div className="absolute bottom-4 left-4 z-20 flex items-center gap-1.5 rounded-full border border-jukebox-gold/30 bg-black/70 px-3 py-1 backdrop-blur-md">
-                    <Disc3 className={`h-3.5 w-3.5 text-jukebox-gold ${isPlaying ? 'animate-spin' : ''}`} />
-                    <span className="font-button text-[10px] font-bold uppercase tracking-wider text-jukebox-cream/90">
-                      Audio Experience
+                  {/* Mode Badge */}
+                  <div className="absolute bottom-3 left-4 z-20 flex items-center gap-1.5 rounded-full border border-jukebox-gold/30 bg-black/70 px-3 py-1 backdrop-blur-md">
+                    <Music className="h-3.5 w-3.5 text-jukebox-gold" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-jukebox-gold">
+                      Song Mode (YouTube Music)
                     </span>
                   </div>
-
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-white/5" />
-                  <div className="absolute inset-0 ring-1 ring-inset ring-white/10" />
                 </div>
               )}
             </div>
           </div>
-        </div>
 
-        {/* Mobile controls & track display */}
-        <div className="mt-5 flex w-full max-w-xl flex-col items-center gap-5 lg:hidden">
-          <div className="jukebox-display w-full rounded-2xl px-4 py-3 text-center">
-            <p className="font-button text-[10px] font-black uppercase tracking-[0.28em] text-jukebox-gold/70">
-              {isVideoMode ? 'Now Streaming Video' : 'Now Spinning Audio'}
-            </p>
-
-            <motion.h2
-              key={(currentTrack as any).videoId || (currentTrack as any).video_id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="font-heading mt-1 truncate text-xl font-black uppercase heading-tracking text-jukebox-cream"
-            >
+          {/* Track Details & Bottom Info */}
+          <div className="mt-5 text-center">
+            <h3 className="font-heading truncate text-xl font-black uppercase heading-tracking text-jukebox-cream sm:text-2xl">
               {currentTrack.title}
-            </motion.h2>
-
-            <p className="font-button mt-1 truncate text-xs font-semibold uppercase tracking-[0.16em] text-jukebox-cyan/75">
+            </h3>
+            <p className="font-body mt-1 text-sm font-semibold text-jukebox-cream/70 sm:text-base">
               {currentTrack.artist}
             </p>
           </div>
 
-          <div className="w-full space-y-3">
+          {/* Interactive Progress Bar */}
+          <div className="mt-4 px-2 sm:px-6">
             <div
               ref={progressRef}
-              className="group relative h-4 cursor-pointer rounded-full jukebox-progress-track"
               onClick={handleSeek}
               onMouseMove={handleSeekHover}
               onMouseLeave={() => setSeekHover(null)}
+              className="group relative h-3.5 cursor-pointer rounded-full jukebox-progress-track"
               title={isHost ? 'Click to seek' : 'Only host can seek'}
             >
               <motion.div
@@ -598,61 +592,62 @@ export function Player() {
                 layout
               />
 
-              {seekHover !== null && (
+              <div
+                className="absolute top-1/2 h-5 w-5 -translate-y-1/2 rounded-full border border-jukebox-gold/70 bg-jukebox-cream opacity-0 shadow-jukebox-gold transition-opacity group-hover:opacity-100"
+                style={{ left: `calc(${progress}% - 10px)` }}
+              />
+
+              {seekHover !== null && duration > 0 && (
                 <div
-                  className="absolute top-1/2 h-5 w-0.5 -translate-x-1/2 -translate-y-1/2 bg-jukebox-cream/70"
+                  className="font-button absolute -top-8 -translate-x-1/2 rounded bg-black/90 px-2 py-0.5 text-[10px] font-bold text-jukebox-cream border border-jukebox-gold/30 pointer-events-none"
                   style={{ left: `${(seekHover / duration) * 100}%` }}
-                />
+                >
+                  {formatTime(seekHover)}
+                </div>
               )}
             </div>
 
-            <div className="font-button flex justify-between text-[10px] font-black uppercase tracking-[0.16em] text-jukebox-cream/45">
+            <div className="font-button mt-2 flex items-center justify-between text-xs font-black tracking-widest text-jukebox-cream/60">
               <span>{formatTime(currentTime)}</span>
               <span>{formatTime(duration)}</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-5">
+          {/* Quick Player Controls (Mobile / In-Panel) */}
+          <div className="mt-4 flex items-center justify-center gap-4">
             <Button
               variant="ghost"
               size="icon"
-              onClick={toggleMute}
-              className="h-16 w-16 rounded-full border border-jukebox-gold/30 bg-black/40 text-jukebox-gold transition-all hover:bg-jukebox-gold/10 hover:text-jukebox-cream"
+              onClick={handlePrevious}
+              disabled={!isHost}
+              className="h-10 w-10 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold hover:bg-jukebox-gold/10 hover:text-jukebox-cream disabled:opacity-30"
+              title="Previous Song"
             >
-              {muted ? <VolumeX className="h-6 w-6" /> : <Volume2 className="h-6 w-6" />}
+              <SkipBack className="h-5 w-5" />
             </Button>
 
             <motion.button
-              whileTap={{ scale: 0.9 }}
+              whileTap={{ scale: 0.92 }}
               onClick={handlePlayPause}
-              className="jukebox-chrome-button flex h-24 w-24 items-center justify-center rounded-full transition-all"
+              className="jukebox-chrome-button flex h-14 w-14 items-center justify-center rounded-full shadow-lg"
             >
               {isPlaying ? (
-                <Pause className="h-10 w-10 text-jukebox-black" />
+                <Pause className="h-6 w-6 text-jukebox-black" />
               ) : (
-                <Play className="ml-0.5 h-10 w-10 text-jukebox-black" />
+                <Play className="ml-0.5 h-6 w-6 text-jukebox-black" />
               )}
             </motion.button>
 
-            {isHost ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleSkip}
-                className="h-16 w-16 rounded-full border border-jukebox-cyan/40 bg-black/40 text-jukebox-cyan transition-all hover:bg-jukebox-cyan/10 hover:text-jukebox-cream"
-                title="Next Track"
-              >
-                <SkipForward className="h-6 w-6" />
-              </Button>
-            ) : (
-              <div className="h-16 w-16" />
-            )}
-          </div>
-
-          <div className="font-button flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.22em] text-jukebox-cream/35">
-            <Sparkles className="h-3 w-3 text-jukebox-gold/60" />
-            {isHost ? 'Host Controls Active' : 'Synced Playback'}
-            <Sparkles className="h-3 w-3 text-jukebox-cyan/60" />
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleSkip}
+              disabled={!isHost}
+              className="h-10 w-10 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold hover:bg-jukebox-gold/10 hover:text-jukebox-cream disabled:opacity-30"
+              title="Next Song"
+            >
+              <SkipForward className="h-5 w-5" />
+            </Button>
           </div>
         </div>
       </div>

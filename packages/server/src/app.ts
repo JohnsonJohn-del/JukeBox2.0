@@ -10,12 +10,18 @@ import { errorHandler, notFoundHandler } from './middleware/error.middleware'
 
 const app = express()
 
-app.use(helmet())
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}))
+
+// Universal CORS allowing Vercel, local development, and mobile devices
 app.use(cors({
-  origin: config.cors.origin,
+  origin: (origin, callback) => {
+    callback(null, true)
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 }))
 
 app.use(morgan(config.isDev ? 'dev' : 'combined'))
@@ -49,7 +55,6 @@ app.get('/health', (_req, res) => {
       status: 'ok',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      environment: config.nodeEnv,
     },
   })
 })

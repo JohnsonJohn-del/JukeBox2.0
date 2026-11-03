@@ -87,7 +87,7 @@ async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResu
           clientName: 'WEB_REMIX',
           clientVersion: '1.20240101.01.00',
           hl: 'en',
-          gl: 'US',
+          gl: 'IN',
         },
       },
       query: searchQuery,
@@ -102,7 +102,15 @@ async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResu
     }
   )
 
-  const results: SearchResult[] = []
+  const rawItems: Array<{
+    videoId: string
+    title: string
+    artist: string
+    duration: number
+    thumbnails: { default: string; medium: string; high: string }
+    isVideo: boolean
+  }> = []
+
   const tab = response.data?.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer
   const sections = tab?.content?.sectionListRenderer?.contents || []
 
@@ -144,16 +152,14 @@ async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResu
       if (!videoId) continue
 
       const title = titleRun?.text || 'Unknown Title'
-      const isVideo = byline.toLowerCase().includes('video')
+      const isVideo = byline.toLowerCase().includes('video') || title.toLowerCase().includes('video')
 
-      // Extract duration from byline or fixed columns if present
       let duration = 210
       const durationRun = bylineRuns.find((x: any) => /^\d+:\d+(?::\d+)?$/.test(x.text?.trim()))
       if (durationRun) {
         duration = parseDuration(durationRun.text.trim())
       }
 
-      // Extract artist from byline (skip "Song • " or "Video • ")
       let artist = 'Unknown Artist'
       for (const run of bylineRuns) {
         const text = run.text?.trim()
@@ -167,22 +173,7 @@ async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResu
       const defaultThumb = thumbs[0]?.url || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
       const highThumb = thumbs[thumbs.length - 1]?.url || defaultThumb
 
-      let counterpartId: string | null = null
-      let hasVideo = false
-
-      if (isVideo) {
-        counterpartId = videoId
-        hasVideo = true
-      } else if (
-        cardMusicVideoId &&
-        (title.toLowerCase().includes(cardTitle.slice(0, 10).toLowerCase()) ||
-          cardTitle.toLowerCase().includes(title.slice(0, 10).toLowerCase()))
-      ) {
-        counterpartId = cardMusicVideoId
-        hasVideo = true
-      }
-
-      results.push({
+      rawItems.push({
         videoId,
         title,
         artist,
@@ -192,13 +183,59 @@ async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResu
           medium: defaultThumb,
           high: highThumb,
         },
-        musicVideoId: counterpartId,
-        hasVideo,
+        isVideo,
       })
     }
   }
 
-  return results.slice(0, 20)
+  // Two-pass counterpart linking:
+  // Separate videos and songs from the results
+  const videos = rawItems.filter((item) => item.isVideo)
+  const results: SearchResult[] = []
+
+  for (const item of rawItems) {
+    let counterpartId: string | null = null
+    let hasVideo = false
+
+    if (item.isVideo) {
+      counterpartId = item.videoId
+      hasVideo = true
+    } else {
+      // Look for matching video in search results
+      const cleanSongTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim()
+      const songWords = cleanSongTitle.split(/\s+/).filter((w) => w.length > 2)
+
+      const matchingVideo = videos.find((v) => {
+        const cleanVidTitle = v.title.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim()
+        const matchCount = songWords.filter((w) => cleanVidTitle.includes(w)).length
+        return matchCount >= Math.min(2, Math.max(1, songWords.length))
+      })
+
+      if (matchingVideo) {
+        counterpartId = matchingVideo.videoId
+        hasVideo = true
+      } else if (
+        cardMusicVideoId &&
+        (item.title.toLowerCase().includes(cardTitle.slice(0, 10).toLowerCase()) ||
+          cardTitle.toLowerCase().includes(item.title.slice(0, 10).toLowerCase()))
+      ) {
+        counterpartId = cardMusicVideoId
+        hasVideo = true
+      }
+    }
+
+    results.push({
+      videoId: item.videoId,
+      title: item.title,
+      artist: item.artist,
+      duration: item.duration,
+      thumbnails: item.thumbnails,
+      musicVideoId: counterpartId,
+      hasVideo,
+    })
+  }
+
+  return results.slice(0, 25)
 }
 
 function parseYoutubeHtml(html: string, _query: string): SearchResult[] {
@@ -232,7 +269,8 @@ function parseYoutubeHtml(html: string, _query: string): SearchResult[] {
           const isMusicVideo =
             title.toLowerCase().includes('official video') ||
             title.toLowerCase().includes('official music video') ||
-            title.toLowerCase().includes('music video')
+            title.toLowerCase().includes('music video') ||
+            title.toLowerCase().includes('lyric video')
 
           results.push({
             videoId,

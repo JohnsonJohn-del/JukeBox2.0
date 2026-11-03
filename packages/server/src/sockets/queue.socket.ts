@@ -67,12 +67,17 @@ export function registerQueueHandlers(
     }
   })
 
-  socket.on('reorder_queue', async (payload) => {
+  socket.on('reorder_queue' as any, async (payload: any) => {
     try {
       const userId = socket.data.userId
-      const { roomId, itemId, newIndex } = payload
+      const { roomId, itemId, newIndex, items } = payload
 
-      const queue = await queueService.reorderQueue(roomId, itemId, newIndex, userId)
+      let queue: any
+      if (items && Array.isArray(items)) {
+        queue = await queueService.reorderQueueBatch(roomId, items, userId)
+      } else {
+        queue = await queueService.reorderQueue(roomId, itemId, newIndex, userId)
+      }
       io.to(roomId).emit('queue_updated', { queue })
     } catch (error: any) {
       socket.emit('error', { message: error.message || 'Failed to reorder queue', code: 'REORDER_FAILED' })
