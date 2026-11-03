@@ -233,7 +233,7 @@ export async function reorderQueue(
     throw new AppError('Failed to fetch queue', 500, 'FETCH_FAILED')
   }
 
-  const itemIndex = queue.findIndex((q) => q.id === itemId)
+  const itemIndex = queue.findIndex((q: any) => q.id === itemId)
   if (itemIndex === -1) {
     throw new AppError('Song not found in queue', 404, 'SONG_NOT_FOUND')
   }

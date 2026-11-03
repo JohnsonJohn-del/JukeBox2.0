@@ -398,7 +398,7 @@ export async function getActiveRooms(userId: string): Promise<Room[]> {
     return []
   }
 
-  const roomIds = memberships.map((m) => m.room_id)
+  const roomIds = memberships.map((m: any) => m.room_id)
 
   const { data: rooms } = await db
     .from('rooms')

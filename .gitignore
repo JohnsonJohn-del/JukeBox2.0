@@ -45,3 +45,7 @@ tsconfig.tsbuildinfo
 .cache/
 tmp/
 temp/
+
+# Local DB & Vercel
+data/
+.vercel/
