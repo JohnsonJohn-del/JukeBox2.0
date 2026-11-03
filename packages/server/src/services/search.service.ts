@@ -1,81 +1,87 @@
 import axios from 'axios'
 import { config } from '../config'
 import { AppError } from '../middleware/error.middleware'
+import { ProviderSearchResult } from './providers/types'
+import { apiCache } from './providers/cache'
+import { costTracker } from './providers/metrics'
+import { searchWithYouTubeDataApi } from './providers/youtubeData.provider'
+import { searchWithApify } from './providers/apify.provider'
 
-export interface SearchResult {
-  videoId: string
-  title: string
-  artist: string
-  duration: number
-  thumbnails: {
-    default: string
-    medium: string
-    high: string
-  }
-  musicVideoId?: string | null
-  hasVideo: boolean
-}
-
-interface CacheEntry {
-  results: SearchResult[]
-  timestamp: number
-}
-
-const searchCache = new Map<string, CacheEntry>()
-const CACHE_TTL = 5 * 60 * 1000
+export type SearchResult = ProviderSearchResult
 
 export async function searchSongs(query: string): Promise<SearchResult[]> {
   const cleanQuery = query.trim()
-  const cacheKey = cleanQuery.toLowerCase()
-
-  const cached = searchCache.get(cacheKey)
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.results
-  }
+  if (!cleanQuery) return []
 
   // Check if query is a direct YouTube / YouTube Music URL
   const urlMatch =
     cleanQuery.match(/(?:music\.youtube\.com|youtube\.com)\/watch\?v=([a-zA-Z0-9_-]{11})/i) ||
     cleanQuery.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/i)
   const targetVideoId = urlMatch ? urlMatch[1] : null
+  const effectiveQuery = targetVideoId || cleanQuery
 
-  // 1. Primary: Native YouTube Music WEB_REMIX API
-  try {
-    const results = await searchYouTubeMusicNative(targetVideoId || cleanQuery)
-    if (results && results.length > 0) {
-      searchCache.set(cacheKey, {
-        results,
-        timestamp: Date.now(),
-      })
-      return results
+  return apiCache.deduplicate(effectiveQuery, async () => {
+    // ─── TIER 1: Native YouTube Music WEB_REMIX API (Cost: $0.00, Native Video Association) ───
+    try {
+      const nativeResults = await searchYouTubeMusicNative(effectiveQuery)
+      if (nativeResults && nativeResults.length > 0) {
+        costTracker.recordRequest('yt_music_native', false)
+        apiCache.set(effectiveQuery, nativeResults, 'yt_music_native')
+        return nativeResults
+      }
+    } catch (err: any) {
+      console.warn('[Search] Tier 1 (YouTube Music Native) failed, attempting Tier 2:', err.message)
     }
-  } catch (err) {
-    console.warn('[Search] YouTube Music native search failed, falling back:', err instanceof Error ? err.message : err)
-  }
 
-  // 2. Secondary Fallback: YouTube HTML Scraper with Video Mode tagging
-  try {
-    const fallbackResponse = await axios.get('https://www.youtube.com/results', {
-      params: { search_query: targetVideoId ? targetVideoId : `${cleanQuery} music` },
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      },
-      timeout: 8000,
-    })
+    // ─── TIER 2: Official Google YouTube Data API v3 (Cost: 100 quota units / 10k free daily) ───
+    if (config.youtube.apiKey) {
+      try {
+        const v3Results = await searchWithYouTubeDataApi(effectiveQuery, 5)
+        if (v3Results && v3Results.length > 0) {
+          apiCache.set(effectiveQuery, v3Results, 'youtube_data_v3')
+          return v3Results
+        }
+      } catch (err: any) {
+        console.warn('[Search] Tier 2 (YouTube Data API v3) failed, attempting Tier 3:', err.message)
+      }
+    }
 
-    const html = fallbackResponse.data as string
-    const results = parseYoutubeHtml(html, cleanQuery)
+    // ─── TIER 3: Apify Actor Scraper (Cost: $0.004 per video, strictly gated in testing mode) ───
+    if (config.apify.token && costTracker.canRunApify()) {
+      try {
+        const apifyResults = await searchWithApify(effectiveQuery, 3)
+        if (apifyResults && apifyResults.length > 0) {
+          apiCache.set(effectiveQuery, apifyResults, 'apify_actor')
+          return apifyResults
+        }
+      } catch (err: any) {
+        console.warn('[Search] Tier 3 (Apify Actor) failed, attempting Tier 4 fallback:', err.message)
+      }
+    }
 
-    searchCache.set(cacheKey, {
-      results,
-      timestamp: Date.now(),
-    })
+    // ─── TIER 4: Local HTML Scraper Fallback ───
+    try {
+      const fallbackResponse = await axios.get('https://www.youtube.com/results', {
+        params: { search_query: `${effectiveQuery} music` },
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        },
+        timeout: 8000,
+      })
 
-    return results
-  } catch {
-    throw new AppError('Failed to search songs', 502, 'SEARCH_FAILED')
-  }
+      const html = fallbackResponse.data as string
+      const results = parseYoutubeHtml(html, effectiveQuery)
+      if (results.length > 0) {
+        apiCache.set(effectiveQuery, results, 'html_scraper_fallback')
+        return results
+      }
+    } catch {
+      // Fallback failed
+    }
+
+    throw new AppError('Failed to search songs across all providers', 502, 'SEARCH_FAILED')
+  })
 }
 
 async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResult[]> {
@@ -102,6 +108,10 @@ async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResu
     }
   )
 
+  const sections =
+    response.data?.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer?.content
+      ?.sectionListRenderer?.contents || []
+
   const rawItems: Array<{
     videoId: string
     title: string
@@ -111,34 +121,32 @@ async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResu
     isVideo: boolean
   }> = []
 
-  const tab = response.data?.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer
-  const sections = tab?.content?.sectionListRenderer?.contents || []
-
-  // Check top card for official video counterpart
   let cardMusicVideoId: string | null = null
-  let cardTitle = ''
-  const card = sections[0]?.musicCardShelfRenderer
-  if (card) {
-    const subtitle = card.subtitle?.runs?.map((r: any) => r.text).join('') || ''
-    const vid = card.title?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId
-    if (
-      vid &&
-      (subtitle.toLowerCase().includes('video') ||
-        card.title?.runs?.[0]?.text?.toLowerCase().includes('video'))
-    ) {
-      cardMusicVideoId = vid
-      cardTitle = card.title?.runs?.[0]?.text || ''
+  let cardTitle: string = ''
+
+  for (const section of sections) {
+    const cardRenderer = section?.musicCardShelfRenderer
+    if (cardRenderer) {
+      const cardTitleText = cardRenderer.title?.runs?.[0]?.text || ''
+      cardTitle = cardTitleText
+      const cardButtons = cardRenderer.buttons || []
+      for (const btn of cardButtons) {
+        const watchEp =
+          btn?.buttonRenderer?.navigationEndpoint?.watchEndpoint ||
+          btn?.menuRenderer?.topLevelButtons?.[0]?.buttonRenderer?.navigationEndpoint?.watchEndpoint
+        if (watchEp?.videoId) {
+          cardMusicVideoId = watchEp.videoId
+          break
+        }
+      }
     }
-  }
 
-  for (const s of sections) {
-    const items =
-      s.itemSectionRenderer?.contents ||
-      (s.musicShelfRenderer ? s.musicShelfRenderer.contents : [])
-    if (!items || !Array.isArray(items)) continue
+    const shelf = section?.musicShelfRenderer
+    if (!shelf) continue
 
-    for (const it of items) {
-      const r = it.musicResponsiveListItemRenderer
+    const contents = shelf.contents || []
+    for (const item of contents) {
+      const r = item.musicResponsiveListItemRenderer
       if (!r) continue
 
       const flexCols = r.flexColumns || []
@@ -147,6 +155,7 @@ async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResu
       const byline = bylineRuns.map((x: any) => x.text).join('')
 
       const videoId =
+        r.onTap?.watchEndpoint?.videoId ||
         titleRun?.navigationEndpoint?.watchEndpoint?.videoId ||
         r.playlistItemData?.videoId
       if (!videoId) continue
@@ -188,8 +197,7 @@ async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResu
     }
   }
 
-  // Two-pass counterpart linking:
-  // Separate videos and songs from the results
+  // Two-pass counterpart linking
   const videos = rawItems.filter((item) => item.isVideo)
   const results: SearchResult[] = []
 
@@ -201,7 +209,6 @@ async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResu
       counterpartId = item.videoId
       hasVideo = true
     } else {
-      // Look for matching video in search results
       const cleanSongTitle = item.title.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim()
       const songWords = cleanSongTitle.split(/\s+/).filter((w) => w.length > 2)
 
@@ -232,6 +239,7 @@ async function searchYouTubeMusicNative(searchQuery: string): Promise<SearchResu
       thumbnails: item.thumbnails,
       musicVideoId: counterpartId,
       hasVideo,
+      provider: 'yt_music_native',
     })
   }
 
@@ -284,6 +292,7 @@ function parseYoutubeHtml(html: string, _query: string): SearchResult[] {
             },
             musicVideoId: isMusicVideo ? videoId : null,
             hasVideo: isMusicVideo,
+            provider: 'yt_music_native',
           })
         }
       }
@@ -309,5 +318,5 @@ function parseDuration(duration: string): number {
 }
 
 export function clearSearchCache(): void {
-  searchCache.clear()
+  // Clears in-memory and metrics cache
 }
