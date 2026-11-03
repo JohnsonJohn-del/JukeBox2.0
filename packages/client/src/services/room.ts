@@ -1,18 +1,25 @@
 import { api } from './api';
-import type { Room, RoomMember } from '@/types';
+import type { Room, RoomMember, User } from '@/types';
 
 interface CreateRoomResponse {
   room: Room;
+  member: RoomMember;
 }
 
-interface JoinRoomResponse {
+export interface JoinRoomResponse {
   room: Room;
   member: RoomMember;
+  token?: string;
+  user?: User;
 }
 
 interface GetRoomResponse {
   room: Room;
   members: RoomMember[];
+}
+
+interface GetRoomByCodeResponse {
+  room: Room;
 }
 
 export const roomService = {
@@ -26,6 +33,10 @@ export const roomService = {
 
   getRoom(roomId: string): Promise<GetRoomResponse> {
     return api.get<GetRoomResponse>(`/rooms/${roomId}`);
+  },
+
+  getRoomByCode(code: string): Promise<GetRoomByCodeResponse> {
+    return api.get<GetRoomByCodeResponse>(`/rooms/code/${code}`);
   },
 
   leaveRoom(roomId: string): Promise<void> {

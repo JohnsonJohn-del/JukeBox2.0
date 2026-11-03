@@ -62,6 +62,8 @@ export async function addSong(
     artist: string
     duration: number
     thumbnail?: string | null
+    musicVideoId?: string | null
+    hasVideo?: boolean
   }
 ): Promise<QueueItem> {
   const db = getDbClient()
@@ -114,6 +116,8 @@ export async function addSong(
       room_id: roomId,
       added_by: userId,
       video_id: songData.videoId,
+      music_video_id: songData.musicVideoId || null,
+      has_video: Boolean(songData.hasVideo),
       title: songData.title,
       artist: songData.artist,
       duration: songData.duration,

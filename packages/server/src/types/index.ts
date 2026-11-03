@@ -14,6 +14,7 @@ export interface Room {
   host_id: string
   name: string | null
   is_active: boolean
+  is_video_mode?: boolean
   current_track_id: string | null
   created_at: string
   updated_at: string
@@ -34,6 +35,8 @@ export interface QueueItem {
   room_id: string
   added_by: string
   video_id: string
+  music_video_id?: string | null
+  has_video?: boolean
   title: string
   artist: string
   duration: number
@@ -46,6 +49,7 @@ export interface QueueItem {
 export interface JwtPayload {
   userId: string
   role: 'user' | 'guest'
+  nickname?: string
   roomId?: string
   iat: number
   exp: number
@@ -56,6 +60,7 @@ export interface PlaybackState {
   playbackState: 'playing' | 'paused' | 'stopped'
   playbackPosition: number
   playbackStartTime: number | null
+  isVideoMode: boolean
 }
 
 export interface AuthRequest {

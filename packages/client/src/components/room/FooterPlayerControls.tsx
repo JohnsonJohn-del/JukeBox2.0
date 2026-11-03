@@ -2,7 +2,8 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Play, Pause, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Video, Tv, Film } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useSocket } from '@/hooks/useSocket';
 import { usePlayer } from '@/hooks/usePlayer';
 import { usePlayerStore } from '@/store/playerStore';
@@ -25,14 +26,16 @@ export function FooterPlayerControls() {
   const [muted, setMuted] = useState(false);
 
   const { socket } = useSocket();
-  const { room, isHost } = useRoomStore();
+  const { room, isHost, setVideoMode } = useRoomStore();
   const { currentTrack } = useQueueStore();
 
   const {
     playbackState,
     currentTime,
     duration,
+    isVideoMode,
     setCurrentTime,
+    setIsVideoMode,
   } = usePlayerStore();
 
   const {
@@ -41,10 +44,11 @@ export function FooterPlayerControls() {
     seekTo,
     mute: mutePlayer,
     unMute: unMutePlayer,
-  } = usePlayer('youtube-player');
+  } = usePlayer('youtube-player-element');
 
   const isPlaying = playbackState === 'playing';
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const trackHasVideoCounterpart = Boolean(currentTrack?.hasVideo && currentTrack?.musicVideoId);
 
   const handlePlayPause = useCallback(() => {
     if (!currentTrack) return;
@@ -63,6 +67,30 @@ export function FooterPlayerControls() {
       });
     }
   }, [currentTrack, isPlaying, pause, play, socket, room?.id, currentTime]);
+
+  const handleToggleVideoMode = useCallback(() => {
+    if (!currentTrack) return;
+
+    if (!isHost) {
+      toast('Only the room host can switch Video Mode', { icon: '🔒' });
+      return;
+    }
+
+    if (!isVideoMode && !trackHasVideoCounterpart) {
+      toast.error('Official music video counterpart is not available on YouTube Music for this track.');
+      return;
+    }
+
+    const nextMode = !isVideoMode;
+    setIsVideoMode(nextMode);
+    setVideoMode(nextMode);
+
+    socket.emit(SOCKET_EVENTS.TOGGLE_VIDEO_MODE, {
+      roomId: room?.id,
+      isVideoMode: nextMode,
+      position: currentTime,
+    });
+  }, [currentTrack, isHost, isVideoMode, trackHasVideoCounterpart, setIsVideoMode, setVideoMode, socket, room?.id, currentTime]);
 
   const handleSeek = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -151,10 +179,48 @@ export function FooterPlayerControls() {
             </p>
           </div>
 
-          <div className="font-button flex shrink-0 items-center gap-2 text-[10px] font-black tracking-widest text-jukebox-cream/45">
-            <span>{formatTime(currentTime)}</span>
-            <span>/</span>
-            <span>{formatTime(duration)}</span>
+          <div className="flex items-center gap-3">
+            {/* Video Mode toggle button in footer */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleToggleVideoMode}
+              disabled={!isHost && !isVideoMode}
+              className={`h-7 rounded-full px-2.5 text-[10px] font-bold transition-all ${
+                isVideoMode
+                  ? 'border-red-500/50 bg-red-600/20 text-red-400 hover:bg-red-600/30'
+                  : trackHasVideoCounterpart
+                  ? 'border-jukebox-gold/30 bg-black/40 text-jukebox-gold hover:bg-jukebox-gold/15'
+                  : 'border-white/10 bg-white/5 text-gray-500 opacity-60'
+              }`}
+              title={
+                !trackHasVideoCounterpart
+                  ? 'No video counterpart on YouTube Music'
+                  : !isHost
+                  ? 'Host controls Video Mode'
+                  : isVideoMode
+                  ? 'Switch to Audio'
+                  : 'Switch to Video'
+              }
+            >
+              {isVideoMode ? (
+                <>
+                  <Tv className="mr-1 h-3 w-3 animate-pulse text-red-400" />
+                  Video ON
+                </>
+              ) : (
+                <>
+                  <Video className="mr-1 h-3 w-3" />
+                  {trackHasVideoCounterpart ? 'Video Avail' : 'Audio Only'}
+                </>
+              )}
+            </Button>
+
+            <div className="font-button flex shrink-0 items-center gap-2 text-[10px] font-black tracking-widest text-jukebox-cream/45">
+              <span>{formatTime(currentTime)}</span>
+              <span>/</span>
+              <span>{formatTime(duration)}</span>
+            </div>
           </div>
         </div>
 

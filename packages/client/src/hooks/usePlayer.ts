@@ -16,10 +16,13 @@ const playerCache = new Map<string, CachedPlayer>();
 declare global {
   interface Window {
     onYouTubeIframeAPIReady?: () => void;
+    ytPlayer?: YT.Player | null;
   }
 }
 
 function loadYouTubeAPI(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+
   if (window.YT && window.YT.Player) {
     return Promise.resolve();
   }
@@ -40,7 +43,9 @@ function loadYouTubeAPI(): Promise<void> {
       document.body.appendChild(tag);
     }
 
+    const prevOnReady = window.onYouTubeIframeAPIReady;
     window.onYouTubeIframeAPIReady = () => {
+      if (prevOnReady) prevOnReady();
       resolve();
     };
 
@@ -73,10 +78,13 @@ export function usePlayer(
   containerId: string = 'youtube-player',
   options?: {
     onEnded?: () => void;
+    onError?: (errorCode: number) => void;
   }
 ) {
   const playerRef = useRef<YT.Player | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const [isReady, setIsReady] = useState(false);
 
@@ -105,7 +113,7 @@ export function usePlayer(
 
         const entry = playerCache.get(containerId);
 
-        if (entry?.player) {
+        if (entry?.player && typeof entry.player.playVideo === 'function') {
           playerRef.current = entry.player;
           if (entry.ready) setIsReady(true);
           startSyncInterval(entry.player);
@@ -117,12 +125,10 @@ export function usePlayer(
         if (!container) {
           container = document.createElement('div');
           container.id = containerId;
-
           container.style.position = 'absolute';
           container.style.left = '-9999px';
           container.style.width = '1px';
           container.style.height = '1px';
-
           document.body.appendChild(container);
         }
 
@@ -131,9 +137,8 @@ export function usePlayer(
         cachedEntry.ready = false;
 
         const player = new window.YT.Player(containerId, {
-          height: '1',
-          width: '1',
-
+          height: '100%',
+          width: '100%',
           playerVars: {
             autoplay: 0,
             controls: 0,
@@ -141,20 +146,18 @@ export function usePlayer(
             rel: 0,
             playsinline: 1,
             enablejsapi: 1,
-            origin: window.location.origin,
+            origin: typeof window !== 'undefined' ? window.location.origin : undefined,
           },
-
           events: {
             onReady: (event) => {
               if (!mounted) return;
 
               playerRef.current = event.target;
-              (window as any).ytPlayer = event.target;
+              window.ytPlayer = event.target;
               cachePlayerRef(containerId, event.target, true);
               setIsReady(true);
 
-              console.log('[YouTube] Player ready');
-
+              console.log('[YouTube] Player ready on container:', containerId);
               startSyncInterval(event.target);
             },
 
@@ -176,7 +179,7 @@ export function usePlayer(
 
                 case window.YT.PlayerState.ENDED:
                   setPlaybackState('stopped');
-                  options?.onEnded?.();
+                  optionsRef.current?.onEnded?.();
                   break;
 
                 case window.YT.PlayerState.CUED:
@@ -186,11 +189,12 @@ export function usePlayer(
                 default:
                   break;
               }
-              console.log('[YouTube State]', event.data);
             },
 
             onError: (error) => {
-              console.error('[YouTube] Player error:', error);
+              const code = typeof error.data === 'number' ? error.data : -1;
+              console.error('[YouTube] Player error code:', code);
+              optionsRef.current?.onError?.(code);
             },
           },
         });
@@ -205,19 +209,24 @@ export function usePlayer(
 
       intervalRef.current = setInterval(() => {
         const p = playerRef.current || target;
-
         if (!p) return;
 
         try {
           if (typeof p.getCurrentTime === 'function') {
-            setCurrentTime(p.getCurrentTime());
+            const time = p.getCurrentTime();
+            if (typeof time === 'number' && !isNaN(time)) {
+              setCurrentTime(time);
+            }
           }
 
           if (typeof p.getDuration === 'function') {
-            setDuration(p.getDuration());
+            const dur = p.getDuration();
+            if (typeof dur === 'number' && !isNaN(dur) && dur > 0) {
+              setDuration(dur);
+            }
           }
-        } catch (err) {
-          console.error('[YouTube] Interval sync error:', err);
+        } catch {
+          // ignore interval reading hiccups during video transition
         }
       }, 1000);
     }
@@ -253,27 +262,35 @@ export function usePlayer(
     };
   }, [containerId, reset, setCurrentTime, setDuration, setPlaybackState]);
 
-  const loadVideo = useCallback((videoId: string) => {
-    console.log('[LOAD VIDEO FUNCTION]', videoId);
-    console.log('[PLAYER REF EXISTS]', !!playerRef.current);
-
+  const loadVideo = useCallback((videoId: string, startSeconds: number = 0) => {
     try {
-      playerRef.current?.loadVideoById(videoId);
-
-      console.log('[LOAD VIDEO CALLED]');
+      if (playerRef.current && typeof playerRef.current.loadVideoById === 'function') {
+        playerRef.current.loadVideoById({
+          videoId,
+          startSeconds: Math.floor(startSeconds),
+        });
+      }
     } catch (err) {
       console.error('[YouTube] loadVideo error:', err);
     }
   }, []);
 
-  const play = useCallback(() => {
-    console.log('[PLAY FUNCTION]');
-    console.log('[PLAYER REF EXISTS]', !!playerRef.current);
+  const cueVideo = useCallback((videoId: string, startSeconds: number = 0) => {
+    try {
+      if (playerRef.current && typeof playerRef.current.cueVideoById === 'function') {
+        playerRef.current.cueVideoById({
+          videoId,
+          startSeconds: Math.floor(startSeconds),
+        });
+      }
+    } catch (err) {
+      console.error('[YouTube] cueVideo error:', err);
+    }
+  }, []);
 
+  const play = useCallback(() => {
     try {
       playerRef.current?.playVideo();
-
-      console.log('[PLAY CALLED]');
     } catch (err) {
       console.error('[YouTube] play error:', err);
     }
@@ -331,6 +348,7 @@ export function usePlayer(
     playerRef,
     isReady,
     loadVideo,
+    cueVideo,
     play,
     pause,
     seekTo,

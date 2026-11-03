@@ -41,6 +41,11 @@
   --jukebox-cream: #ffe9b7;
   --jukebox-brass: #8a5a22;
   --jukebox-wood: #26120d;
+
+  --font-cinzel: 'Cinzel', serif;
+  --font-cormorant: 'Cormorant Garamond', Georgia, serif;
+  --font-league: 'League Spartan', sans-serif;
+  --font-bebas: 'Bebas Neue', sans-serif;
 }
 
 @layer base {

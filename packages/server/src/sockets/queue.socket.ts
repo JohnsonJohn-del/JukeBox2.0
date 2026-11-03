@@ -7,20 +7,10 @@ export function registerQueueHandlers(
   io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
   socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>
 ): void {
-  
   socket.on('add_song', async (payload) => {
-
-    console.log('[ADD SONG EVENT FIRED]');
-
-    console.log('[ADD SONG PAYLOAD]', payload);
-
-    console.log('[SOCKET ROOM ID]', socket.data.roomId);
-    console.log('[PAYLOAD ROOM ID]', payload.roomId);
-    console.log('[SOCKET ID]', socket.id);
-
     try {
       const userId = socket.data.userId
-      const { roomId, videoId, title, artist, duration, thumbnail } = payload
+      const { roomId, videoId, title, artist, duration, thumbnail, musicVideoId, hasVideo } = payload
 
       await queueService.addSong(roomId, userId, {
         videoId,
@@ -28,30 +18,22 @@ export function registerQueueHandlers(
         artist,
         duration,
         thumbnail,
+        musicVideoId,
+        hasVideo,
       })
 
       const state = getOrCreatePlaybackState(roomId)
 
-      console.log('[CURRENT TRACK BEFORE]', state.currentTrack);
-
       if (!state.currentTrack) {
-        console.log('[FETCHING NEXT TRACK]');
+        const nextTrack = await queueService.getNextTrack(roomId)
 
-        const nextTrack = await queueService.getNextTrack(roomId);
-
-        console.log('[NEXT TRACK RESULT]', nextTrack);
-
-        state.currentTrack = nextTrack;
-        state.playbackState = nextTrack ? 'playing' : 'stopped';
-        state.playbackPosition = 0;
-        state.playbackStartTime = nextTrack ? Date.now() : null;
+        state.currentTrack = nextTrack
+        state.playbackState = nextTrack ? 'playing' : 'stopped'
+        state.playbackPosition = 0
+        state.playbackStartTime = nextTrack ? Date.now() : null
 
         if (nextTrack) {
-          console.log('[EMITTING TRACK_CHANGED]', nextTrack.video_id);
-
-          io.to(roomId).emit('track_changed', { track: nextTrack });
-        } else {
-          console.log('[NO NEXT TRACK FOUND]');
+          io.to(roomId).emit('track_changed', { track: nextTrack })
         }
       }
 
@@ -63,6 +45,7 @@ export function registerQueueHandlers(
           state: 'playing',
           position: state.playbackPosition,
           track: state.currentTrack,
+          isVideoMode: state.isVideoMode,
         })
       }
     } catch (error: any) {

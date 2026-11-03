@@ -19,14 +19,19 @@ export async function createRoom(req: Request, res: Response, next: NextFunction
 
 export async function joinRoom(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    if (!req.user) {
-      res.status(401).json(formatError('Authentication required', 'AUTH_REQUIRED'))
+    const { roomCode, nickname } = req.body
+    if (!roomCode || !nickname) {
+      res.status(400).json(formatError('Room code and nickname are required', 'VALIDATION_ERROR'))
       return
     }
 
-    const { roomCode, nickname } = req.body
-    const result = await roomService.joinRoom(roomCode, req.user.userId, nickname)
-    res.json(formatResponse(result, 'Joined room successfully'))
+    if (req.user) {
+      const result = await roomService.joinRoom(roomCode, req.user.userId, nickname)
+      res.json(formatResponse(result, 'Joined room successfully'))
+    } else {
+      const result = await roomService.joinRoomAsGuest(roomCode, nickname)
+      res.json(formatResponse(result, 'Joined room as guest successfully'))
+    }
   } catch (error) {
     next(error)
   }
@@ -103,6 +108,20 @@ export async function endRoom(req: Request, res: Response, next: NextFunction): 
     const { id } = req.params
     await roomService.endRoom(id, req.user.userId)
     res.json(formatResponse(null, 'Room ended successfully'))
+  } catch (error) {
+    next(error)
+  }
+}
+
+export async function getRoomByCode(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { code } = req.params
+    const room = await roomService.getRoomByCode(code)
+    if (!room) {
+      res.status(404).json(formatError('Room not found or inactive', 'ROOM_NOT_FOUND'))
+      return
+    }
+    res.json(formatResponse({ room }))
   } catch (error) {
     next(error)
   }

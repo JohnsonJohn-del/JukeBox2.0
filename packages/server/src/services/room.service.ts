@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { getDbClient } from '../config/database'
 import { Room, RoomMember, QueueItem } from '../types'
 import { generateRoomCode } from '../utils/roomCode'
+import { generateToken } from '../utils/jwt'
 import { AppError } from '../middleware/error.middleware'
 
 export async function createRoom(
@@ -134,6 +135,82 @@ export async function joinRoom(
   }
 
   return { room, member }
+}
+
+
+export async function joinRoomAsGuest(
+  roomCode: string,
+  nickname: string
+): Promise<{ room: Room; member: RoomMember; token: string; user: { id: string; username: string; email: string; role: string } }> {
+  const db = getDbClient()
+
+  const { data: room, error: roomError } = await db
+    .from('rooms')
+    .select('*')
+    .eq('room_code', roomCode.toUpperCase())
+    .maybeSingle()
+
+  if (roomError) {
+    throw new AppError('Database error finding room', 500, 'DB_ERROR')
+  }
+
+  if (!room) {
+    throw new AppError('Room not found', 404, 'ROOM_NOT_FOUND')
+  }
+
+  if (!room.is_active) {
+    throw new AppError('Room is no longer active', 410, 'ROOM_INACTIVE')
+  }
+
+  const guestId = uuidv4()
+  const now = new Date().toISOString()
+  const guestUser = {
+    id: guestId,
+    username: `${nickname.trim()}_${guestId.slice(0, 4)}`,
+    email: `guest_${guestId}@jukebox.local`,
+    password_hash: 'GUEST_EPHEMERAL',
+    avatar_url: null,
+    created_at: now,
+    updated_at: now,
+  }
+
+  const { error: userError } = await db.from('users').insert(guestUser)
+  if (userError) {
+    throw new AppError('Failed to create guest session', 500, 'GUEST_CREATE_FAILED')
+  }
+
+  const memberId = uuidv4()
+  const { data: member, error: memberError } = await db
+    .from('room_members')
+    .insert({
+      id: memberId,
+      room_id: room.id,
+      user_id: guestId,
+      nickname: nickname.trim(),
+      is_host: false,
+      joined_at: now,
+      socket_id: null,
+    })
+    .select('*')
+    .single()
+
+  if (memberError || !member) {
+    throw new AppError('Failed to join room as guest', 500, 'JOIN_FAILED')
+  }
+
+  const token = generateToken({ userId: guestId, role: 'guest' as any })
+
+  return {
+    room,
+    member,
+    token,
+    user: {
+      id: guestId,
+      username: guestUser.username,
+      email: guestUser.email,
+      role: 'guest',
+    },
+  }
 }
 
 export async function leaveRoom(

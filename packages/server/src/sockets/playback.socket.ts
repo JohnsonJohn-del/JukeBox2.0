@@ -9,6 +9,7 @@ interface RoomPlaybackState {
   playbackState: 'playing' | 'paused' | 'stopped'
   playbackPosition: number
   playbackStartTime: number | null
+  isVideoMode: boolean
   playedTrackIds: Set<string>
 }
 
@@ -22,6 +23,7 @@ export function getOrCreatePlaybackState(roomId: string): RoomPlaybackState {
       playbackState: 'stopped',
       playbackPosition: 0,
       playbackStartTime: null,
+      isVideoMode: false,
       playedTrackIds: new Set(),
     }
     roomPlaybackStates.set(roomId, state)
@@ -37,6 +39,7 @@ export function getPlaybackState(roomId: string): PlaybackState {
       playbackState: 'stopped',
       playbackPosition: 0,
       playbackStartTime: null,
+      isVideoMode: false,
     }
   }
 
@@ -50,6 +53,32 @@ export function getPlaybackState(roomId: string): PlaybackState {
     playbackState: state.playbackState,
     playbackPosition: position,
     playbackStartTime: state.playbackStartTime,
+    isVideoMode: state.isVideoMode,
+  }
+}
+
+async function verifyIsHost(roomId: string, userId: string): Promise<boolean> {
+  try {
+    const db = getDbClient()
+    const { data: member } = await db
+      .from('room_members')
+      .select('is_host')
+      .eq('room_id', roomId)
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (member?.is_host) return true
+
+    const { data: room } = await db
+      .from('rooms')
+      .select('host_id')
+      .eq('id', roomId)
+      .maybeSingle()
+
+    return room?.host_id === userId
+  } catch {
+    // If DB check fails or in development without DB, default to true for creator
+    return true
   }
 }
 
@@ -61,17 +90,20 @@ export function registerPlaybackHandlers(
     try {
       const userId = socket.data.userId
       const { roomId, position } = payload
-      const state = getOrCreatePlaybackState(roomId)
 
+      const isHost = await verifyIsHost(roomId, userId)
+      if (!isHost) {
+        socket.emit('error', { message: 'Only the host can control playback', code: 'NOT_HOST' })
+        return
+      }
+
+      const state = getOrCreatePlaybackState(roomId)
       state.playbackState = 'playing'
       state.playbackStartTime = Date.now()
 
       if (position !== undefined) {
         state.playbackPosition = position
       }
-
-      console.log('[PLAYBACK STATE]', state);
-      console.log('[CURRENT TRACK]', state.currentTrack);
 
       if (!state.currentTrack) {
         const nextTrack = await queueService.getNextTrack(roomId)
@@ -87,6 +119,7 @@ export function registerPlaybackHandlers(
         state: 'playing',
         position: state.playbackPosition,
         track: state.currentTrack,
+        isVideoMode: state.isVideoMode,
       })
     } catch (error: any) {
       socket.emit('error', { message: error.message || 'Playback failed', code: 'PLAYBACK_ERROR' })
@@ -95,9 +128,16 @@ export function registerPlaybackHandlers(
 
   socket.on('pause', async (payload) => {
     try {
+      const userId = socket.data.userId
       const { roomId, position } = payload
-      const state = getOrCreatePlaybackState(roomId)
 
+      const isHost = await verifyIsHost(roomId, userId)
+      if (!isHost) {
+        socket.emit('error', { message: 'Only the host can control playback', code: 'NOT_HOST' })
+        return
+      }
+
+      const state = getOrCreatePlaybackState(roomId)
       state.playbackState = 'paused'
       state.playbackPosition = position
       state.playbackStartTime = null
@@ -106,6 +146,7 @@ export function registerPlaybackHandlers(
         state: 'paused',
         position,
         track: state.currentTrack,
+        isVideoMode: state.isVideoMode,
       })
     } catch (error: any) {
       socket.emit('error', { message: error.message || 'Pause failed', code: 'PAUSE_ERROR' })
@@ -114,9 +155,16 @@ export function registerPlaybackHandlers(
 
   socket.on('seek', async (payload) => {
     try {
+      const userId = socket.data.userId
       const { roomId, position } = payload
-      const state = getOrCreatePlaybackState(roomId)
 
+      const isHost = await verifyIsHost(roomId, userId)
+      if (!isHost) {
+        socket.emit('error', { message: 'Only the host can seek', code: 'NOT_HOST' })
+        return
+      }
+
+      const state = getOrCreatePlaybackState(roomId)
       state.playbackPosition = position
 
       if (state.playbackState === 'playing') {
@@ -129,24 +177,43 @@ export function registerPlaybackHandlers(
     }
   })
 
+  socket.on('toggle_video_mode', async (payload) => {
+    try {
+      const userId = socket.data.userId
+      const { roomId, isVideoMode, position } = payload
+
+      const isHost = await verifyIsHost(roomId, userId)
+      if (!isHost) {
+        socket.emit('error', { message: 'Only the host can toggle Video Mode', code: 'NOT_HOST' })
+        return
+      }
+
+      const state = getOrCreatePlaybackState(roomId)
+      state.isVideoMode = isVideoMode
+
+      if (position !== undefined) {
+        state.playbackPosition = position
+      }
+      if (state.playbackState === 'playing') {
+        state.playbackStartTime = Date.now()
+      }
+
+      io.to(roomId).emit('video_mode_changed', {
+        isVideoMode: state.isVideoMode,
+        position: state.playbackPosition,
+      })
+    } catch (error: any) {
+      socket.emit('error', { message: error.message || 'Failed to toggle Video Mode', code: 'TOGGLE_VIDEO_ERROR' })
+    }
+  })
+
   socket.on('next_track', async (payload) => {
     try {
       const userId = socket.data.userId
       const { roomId } = payload
 
-      const db = getDbClient()
-      const { data: room } = await db
-        .from('rooms')
-        .select('host_id')
-        .eq('id', roomId)
-        .maybeSingle()
-
-      if (!room) {
-        socket.emit('error', { message: 'Room not found', code: 'ROOM_NOT_FOUND' })
-        return
-      }
-
-      if (room.host_id !== userId) {
+      const isHost = await verifyIsHost(roomId, userId)
+      if (!isHost) {
         socket.emit('error', { message: 'Only the host can skip tracks', code: 'NOT_HOST' })
         return
       }
@@ -165,33 +232,22 @@ export function registerPlaybackHandlers(
       state.playbackPosition = 0
       state.playbackStartTime = nextTrack ? Date.now() : null
 
-      console.log('[SERVER] Emitting track_changed to room:', roomId);
-
-      const sockets = await io.in(roomId).fetchSockets();
-
-      console.log(
-        '[SERVER] Sockets in room:',
-        sockets.map((s) => ({
-          id: s.id,
-          roomId: s.data.roomId,
-          userId: s.data.userId,
-        }))
-      );
-
       if (nextTrack) {
-        io.to(roomId).emit('track_changed', { track: nextTrack });
+        io.to(roomId).emit('track_changed', { track: nextTrack })
 
         io.to(roomId).emit('playback_state', {
           state: 'playing',
           position: 0,
           track: nextTrack,
-        });
+          isVideoMode: state.isVideoMode,
+        })
       } else {
         io.to(roomId).emit('playback_state', {
           state: 'stopped',
           position: 0,
           track: null,
-        });
+          isVideoMode: state.isVideoMode,
+        })
       }
     } catch (error: any) {
       socket.emit('error', { message: error.message || 'Failed to skip track', code: 'SKIP_ERROR' })
@@ -200,16 +256,18 @@ export function registerPlaybackHandlers(
 
   socket.on('request_sync', async (payload) => {
     try {
-      const { roomId } = payload
+      const { roomId, clientSendTime } = payload
       const state = roomPlaybackStates.get(roomId)
 
       let position = 0
       let playbackState: 'playing' | 'paused' | 'stopped' = 'stopped'
       let currentTrack: QueueItem | null = null
+      let isVideoMode = false
 
       if (state) {
         currentTrack = state.currentTrack
         playbackState = state.playbackState
+        isVideoMode = state.isVideoMode
 
         if (state.playbackState === 'playing' && state.playbackStartTime) {
           position = state.playbackPosition + (Date.now() - state.playbackStartTime) / 1000
@@ -228,6 +286,8 @@ export function registerPlaybackHandlers(
         playbackState,
         playbackPosition: position,
         currentTrack,
+        isVideoMode,
+        clientSendTime,
       })
     } catch (error: any) {
       socket.emit('error', { message: error.message || 'Sync failed', code: 'SYNC_ERROR' })

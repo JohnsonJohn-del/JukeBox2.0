@@ -21,6 +21,8 @@ export const SOCKET_EVENTS = {
   TRACK_CHANGED: 'track_changed',
   SYNC_STATE: 'sync_state',
   REQUEST_SYNC: 'request_sync',
+  TOGGLE_VIDEO_MODE: 'toggle_video_mode',
+  VIDEO_MODE_CHANGED: 'video_mode_changed',
   // Queue events
   ADD_SONG: 'add_song',
   REMOVE_SONG: 'remove_song',

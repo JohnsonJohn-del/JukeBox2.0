@@ -3,6 +3,7 @@ export interface User {
   username: string;
   email: string;
   avatarUrl?: string;
+  role?: 'user' | 'guest';
 }
 
 export interface Room {
@@ -11,6 +12,7 @@ export interface Room {
   hostId: string;
   name: string;
   isActive: boolean;
+  isVideoMode?: boolean;
   currentTrack?: QueueItem;
   createdAt: string;
 }
@@ -26,6 +28,8 @@ export interface RoomMember {
 export interface QueueItem {
   id: string;
   videoId: string;
+  musicVideoId?: string | null;
+  hasVideo?: boolean;
   title: string;
   artist: string;
   duration: number;
@@ -42,10 +46,24 @@ export interface PlayerState {
   videoId?: string;
   currentTime: number;
   duration: number;
+  isVideoMode?: boolean;
+  musicVideoId?: string | null;
+  hasVideo?: boolean;
+}
+
+export interface VideoModeChangedPayload {
+  isVideoMode: boolean;
+  position?: number;
+  roomId?: string;
+  activeVideoId?: string;
+  currentTime?: number;
+  by?: string;
 }
 
 export interface SearchResult {
   videoId: string;
+  musicVideoId?: string | null;
+  hasVideo?: boolean;
   title: string;
   artist: string;
   duration: number;

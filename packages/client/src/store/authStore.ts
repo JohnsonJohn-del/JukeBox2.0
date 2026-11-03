@@ -8,7 +8,7 @@ interface AuthState {
   isAuthenticated: boolean;
   isGuest: boolean;
   setAuth: (user: User, token: string) => void;
-  setGuest: (nickname: string, token: string) => void;
+  setGuest: (nickname: string, token: string, userId?: string) => void;
   logout: () => void;
   updateUser: (user: Partial<User>) => void;
 }
@@ -29,11 +29,11 @@ export const useAuthStore = create<AuthState>()(
           isGuest: false,
         }),
 
-      setGuest: (nickname, token) =>
+      setGuest: (nickname, token, userId) =>
         set({
-          user: { id: '', username: nickname, email: '' },
+          user: { id: userId || '', username: nickname, email: '' },
           token,
-          isAuthenticated: false,
+          isAuthenticated: true,
           isGuest: true,
         }),
 

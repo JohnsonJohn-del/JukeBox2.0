@@ -37,6 +37,12 @@ export interface NextTrackPayload {
   roomId: string
 }
 
+export interface ToggleVideoModePayload {
+  roomId: string
+  isVideoMode: boolean
+  position?: number
+}
+
 export interface AddSongPayload {
   roomId: string
   videoId: string
@@ -44,6 +50,8 @@ export interface AddSongPayload {
   artist: string
   duration: number
   thumbnail?: string | null
+  musicVideoId?: string | null
+  hasVideo?: boolean
 }
 
 export interface RemoveSongPayload {
@@ -59,6 +67,7 @@ export interface ReorderQueuePayload {
 
 export interface RequestSyncPayload {
   roomId: string
+  clientSendTime?: number
 }
 
 export interface RoomCreatedResponse {
@@ -84,6 +93,7 @@ export interface PlaybackStateResponse {
   state: 'playing' | 'paused' | 'stopped'
   position: number
   track: QueueItem | null
+  isVideoMode?: boolean
 }
 
 export interface SeekedResponse {
@@ -92,6 +102,11 @@ export interface SeekedResponse {
 
 export interface TrackChangedResponse {
   track: QueueItem | null
+}
+
+export interface VideoModeChangedResponse {
+  isVideoMode: boolean
+  position: number
 }
 
 export interface QueueUpdatedResponse {
@@ -103,6 +118,8 @@ export interface SyncStateResponse {
   playbackState: 'playing' | 'paused' | 'stopped'
   playbackPosition: number
   currentTrack: QueueItem | null
+  isVideoMode: boolean
+  clientSendTime?: number
 }
 
 export interface ErrorResponse {
@@ -120,6 +137,7 @@ export interface ClientToServerEvents {
   pause: (payload: PausePayload) => void
   seek: (payload: SeekPayload) => void
   next_track: (payload: NextTrackPayload) => void
+  toggle_video_mode: (payload: ToggleVideoModePayload) => void
   add_song: (payload: AddSongPayload) => void
   remove_song: (payload: RemoveSongPayload) => void
   reorder_queue: (payload: ReorderQueuePayload) => void
@@ -135,6 +153,7 @@ export interface ServerToClientEvents {
   playback_state: (response: PlaybackStateResponse) => void
   seeked: (response: SeekedResponse) => void
   track_changed: (response: TrackChangedResponse) => void
+  video_mode_changed: (response: VideoModeChangedResponse) => void
   queue_updated: (response: QueueUpdatedResponse) => void
   sync_state: (response: SyncStateResponse) => void
   error: (response: ErrorResponse) => void

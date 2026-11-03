@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Loader2, Clock, Plus, AlertCircle, Radio, Disc3 } from 'lucide-react';
+import { Search, Loader2, Clock, Plus, AlertCircle, Radio, Disc3, Film } from 'lucide-react';
 import { searchService } from '@/services/search';
 import { useQueue } from '@/hooks/useQueue';
 import { useQueueStore } from '@/store/queueStore';
@@ -112,6 +112,8 @@ export function SearchBar({ className }: { className?: string }) {
       result.artist,
       result.duration,
       getSearchThumbnail(result),
+      result.musicVideoId,
+      result.hasVideo,
     );
 
     setQuery('');
@@ -163,7 +165,7 @@ export function SearchBar({ className }: { className?: string }) {
           onFocus={() => {
             if (results.length > 0 || isLoading) setIsOpen(true);
           }}
-          placeholder="Search the jukebox..."
+          placeholder="Search YouTube Music..."
           className="h-11 rounded-xl border-jukebox-gold/20 bg-black/45 pl-10 pr-10 text-sm font-semibold text-jukebox-cream placeholder:text-black/40 dark:placeholder:text-jukebox-cream/30 focus-visible:ring-jukebox-cyan/35"
         />
 
@@ -186,10 +188,10 @@ export function SearchBar({ className }: { className?: string }) {
             <div className="flex items-center justify-between border-b border-jukebox-gold/15 px-4 py-3">
               <div>
                 <p className="text-[9px] font-black uppercase tracking-[0.28em] text-jukebox-gold/70">
-                  Selection Results
+                  YouTube Music Results
                 </p>
                 <p className="mt-1 text-xs text-jukebox-cream/45">
-                  Pick a song to load into the queue
+                  Official tracks with automatic Video Mode counterpart resolution
                 </p>
               </div>
               <Disc3 className="h-4 w-4 text-jukebox-cyan/70" />
@@ -210,6 +212,7 @@ export function SearchBar({ className }: { className?: string }) {
                 {results.map((result, idx) => {
                   const addDisabled = isAddCooldown || maxQueueReached;
                   const thumbnailUrl = getSearchThumbnail(result);
+                  const hasVideo = Boolean(result.hasVideo && result.musicVideoId);
 
                   return (
                     <motion.button
@@ -234,9 +237,16 @@ export function SearchBar({ className }: { className?: string }) {
                       />
 
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-bold text-jukebox-cream">
-                          {result.title}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-bold text-jukebox-cream">
+                            {result.title}
+                          </p>
+                          {hasVideo && (
+                            <span className="flex shrink-0 items-center gap-1 rounded border border-red-500/30 bg-red-950/40 px-1.5 py-0.5 text-[9px] font-bold text-red-400">
+                              <Film className="h-2.5 w-2.5" /> Video
+                            </span>
+                          )}
+                        </div>
                         <p className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-jukebox-cream/35">
                           {result.artist}
                         </p>

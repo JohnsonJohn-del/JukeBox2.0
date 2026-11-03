@@ -30,10 +30,18 @@ export function useQueue() {
       socket.off(SOCKET_EVENTS.QUEUE_UPDATED, onQueueUpdated);
       socket.off(SOCKET_EVENTS.TRACK_CHANGED, onTrackChanged);
     };
-  }, []);
+  }, [setQueue, setCurrentTrack]);
 
   const addSong = useCallback(
-    (videoId: string, title: string, artist: string, duration: number, thumbnail: string) => {
+    (
+      videoId: string,
+      title: string,
+      artist: string,
+      duration: number,
+      thumbnail: string,
+      musicVideoId?: string | null,
+      hasVideo?: boolean,
+    ) => {
       if (isAddCooldown || !roomId) return;
 
       setIsAddCooldown(true);
@@ -48,9 +56,11 @@ export function useQueue() {
         artist,
         duration,
         thumbnail,
+        musicVideoId,
+        hasVideo,
       });
 
-      console.log('[QUEUE SONG]', { roomId, videoId, title });
+      console.log('[QUEUE SONG]', { roomId, videoId, title, musicVideoId, hasVideo });
     },
     [roomId, isAddCooldown],
   );
@@ -64,18 +74,12 @@ export function useQueue() {
   );
 
   const reorderQueue = useCallback(
-    (itemId: string, newIndex: number) => {
+    (items: { id: string; position: number }[]) => {
       if (!roomId) return;
-      socket.emit(SOCKET_EVENTS.REORDER_QUEUE, { roomId, itemId, newIndex });
+      socket.emit(SOCKET_EVENTS.REORDER_QUEUE, { roomId, items });
     },
     [roomId],
   );
-
-  useEffect(() => {
-    return () => {
-      if (cooldownTimer.current) clearTimeout(cooldownTimer.current);
-    };
-  }, []);
 
   return {
     queue,

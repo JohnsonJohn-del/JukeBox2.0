@@ -11,6 +11,7 @@ interface RoomState {
   removeMember: (userId: string) => void;
   setHost: (hostId: string) => void;
   setIsHost: (isHost: boolean) => void;
+  setVideoMode: (isVideoMode: boolean) => void;
   leaveRoom: () => void;
 }
 
@@ -26,7 +27,12 @@ export const useRoomStore = create<RoomState>()((set) => ({
     set({ members }),
 
   setIsHost: (isHost) =>
-  set({ isHost }),
+    set({ isHost }),
+
+  setVideoMode: (isVideoMode) =>
+    set((state) => ({
+      room: state.room ? { ...state.room, isVideoMode } : null,
+    })),
 
   addMember: (member) =>
     set((state) => ({

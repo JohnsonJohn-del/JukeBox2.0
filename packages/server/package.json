@@ -27,7 +27,7 @@
     "zod": "^3.22.5"
   },
   "engines": {
-    "node": "22.x"
+    "node": ">=20.0.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

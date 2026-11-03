@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { GripVertical, Trash2, Music, Disc3, ListMusic } from 'lucide-react';
+import { GripVertical, Trash2, Music, Disc3, ListMusic, Film } from 'lucide-react';
 import { useQueueStore } from '@/store/queueStore';
 import { useRoomStore } from '@/store/roomStore';
 import { useQueue } from '@/hooks/useQueue';
@@ -121,12 +121,19 @@ function QueueItemRow({
             {item.title}
           </p>
 
-          <p className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-jukebox-cream/35">
-            {item.artist}
-            {!isCurrent && item.addedBy && item.addedBy !== currentUserId && (
-              <span className="text-jukebox-gold/45"> &middot; {item.addedBy}</span>
+          <div className="flex items-center gap-2">
+            <p className="mt-0.5 truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-jukebox-cream/35">
+              {item.artist}
+              {!isCurrent && item.addedBy && item.addedBy !== currentUserId && (
+                <span className="text-jukebox-gold/45"> &middot; {item.addedBy}</span>
+              )}
+            </p>
+            {item.hasVideo && (
+              <span className="flex shrink-0 items-center gap-0.5 rounded border border-red-500/30 bg-red-950/40 px-1 py-0.2 text-[8px] font-bold text-red-400">
+                <Film className="h-2 w-2" /> Video
+              </span>
             )}
-          </p>
+          </div>
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1">
@@ -158,150 +165,116 @@ function QueueItemRow({
 export function Queue({ className }: { className?: string }) {
   const { queue, currentTrack } = useQueueStore();
   const { isHost } = useRoomStore();
-  const currentUserId = useAuthStore((s) => s.user?.id ?? '');
   const { removeSong, reorderQueue } = useQueue();
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const dragIndexRef = useRef<number | null>(null);
+  const user = useAuthStore((s) => s.user);
+  const currentUserId = user?.id ?? '';
 
-  useEffect(() => {
-    if (currentTrack && scrollRef.current) {
-      const element = scrollRef.current.querySelector('[data-current="true"]');
-
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }
-  }, [currentTrack?.id]);
-
-  const handleRemove = useCallback(
-    (itemId: string) => {
-      removeSong(itemId);
-    },
-    [removeSong],
-  );
+  const dragItem = useRef<number | null>(null);
+  const dragOverItem = useRef<number | null>(null);
 
   const handleDragStart = useCallback((index: number) => {
-    dragIndexRef.current = index;
+    dragItem.current = index;
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
     e.preventDefault();
+    dragOverItem.current = index;
   }, []);
 
   const handleDragEnd = useCallback(() => {
-    dragIndexRef.current = null;
+    dragItem.current = null;
+    dragOverItem.current = null;
   }, []);
 
   const handleDrop = useCallback(
-    (toIndex: number) => {
-      const fromIndex = dragIndexRef.current;
+    (dropIndex: number) => {
+      if (dragItem.current === null || dragItem.current === dropIndex) return;
 
-      if (fromIndex === null || fromIndex === toIndex) return;
+      const items = [...queue];
+      const [dragged] = items.splice(dragItem.current, 1);
+      items.splice(dropIndex, 0, dragged);
 
-      const sortedQueue = currentTrack
-        ? [currentTrack, ...queue.filter((item) => item.id !== currentTrack.id)]
-        : queue;
+      const reordered = items.map((item, idx) => ({
+        id: item.id,
+        position: idx + 1,
+      }));
 
-      const item = sortedQueue[fromIndex];
+      reorderQueue(reordered);
 
-      if (item) {
-        reorderQueue(item.id, toIndex);
-      }
-
-      dragIndexRef.current = null;
+      dragItem.current = null;
+      dragOverItem.current = null;
     },
-    [reorderQueue, queue, currentTrack],
+    [queue, reorderQueue],
   );
 
-  const queueWithoutCurrent = currentTrack
-    ? queue.filter((item) => item.id !== currentTrack.id)
-    : queue;
+  const isEmpty = queue.length === 0 && !currentTrack;
 
   return (
-    <div className={cn('flex h-full flex-col bg-jukebox-black/30', className)}>
-      <div className="relative border-b border-jukebox-gold/20 px-4 py-4">
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-jukebox-cyan/50 to-transparent" />
-
-        <div className="flex items-center justify-between gap-3">
+    <div className={cn('flex h-full flex-col', className)}>
+      <div className="flex items-center justify-between border-b border-jukebox-gold/20 px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <ListMusic className="h-4 w-4 dark:text-jukebox-gold/75 text-jukebox-brass" />
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.28em] text-jukebox-gold/70">
-              Song Selector
+            <p className="font-button text-[9px] font-black uppercase tracking-[0.28em] dark:text-jukebox-gold/70 text-jukebox-brass">
+              Program Queue
             </p>
-
-            <h3 className="mt-1 text-sm font-black uppercase tracking-[0.14em] text-jukebox-cream">
-              {queue.length > 0 ? (
-                <>
-                  <span className="text-jukebox-cyan">{queue.length}</span>{' '}
-                  song{queue.length !== 1 ? 's' : ''} loaded
-                </>
-              ) : (
-                'Queue'
-              )}
+            <h3 className="font-heading text-lg font-black uppercase heading-tracking text-jukebox-cream">
+              Upcoming Selections
             </h3>
           </div>
-
-          <div className="flex h-10 w-10 items-center justify-center rounded-full border border-jukebox-gold/40 bg-black/40 shadow-jukebox-gold">
-            <ListMusic className="h-5 w-5 text-jukebox-gold" />
-          </div>
         </div>
+
+        <span className="font-roomcode rounded-xl border border-jukebox-gold/30 bg-black/45 px-2.5 py-1 text-xs font-bold text-jukebox-gold">
+          {queue.length + (currentTrack ? 1 : 0)}
+        </span>
       </div>
 
-      <ScrollArea className="flex-1 px-2 py-3">
-        {queue.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex flex-col items-center justify-center py-16 text-center"
-          >
-            <div className="flex h-16 w-16 items-center justify-center rounded-full jukebox-chrome-button">
-              <Music className="h-7 w-7 text-jukebox-black" />
+      <ScrollArea className="flex-1 p-3">
+        {isEmpty ? (
+          <div className="flex h-64 flex-col items-center justify-center text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-jukebox-gold/20 bg-black/35">
+              <Music className="h-6 w-6 text-jukebox-gold/40" />
             </div>
 
-            <p className="mt-5 text-[10px] font-black uppercase tracking-[0.3em] text-jukebox-gold/70">
-              Empty Selector
+            <p className="font-button mt-4 text-[10px] font-black uppercase tracking-[0.24em] text-jukebox-gold/50">
+              Queue Depleted
             </p>
 
-            <h4 className="mt-2 text-base font-black uppercase tracking-[0.12em] text-jukebox-cream">
-              No songs loaded
-            </h4>
-
-            <p className="mt-2 max-w-[220px] text-xs leading-5 text-jukebox-cream/40">
-              Search and add music to fill the jukebox selection panel.
+            <p className="font-body mt-1 text-sm text-jukebox-cream/45">
+              Search YouTube Music to add songs to the program.
             </p>
-          </motion.div>
+          </div>
         ) : (
-          <div ref={scrollRef} className="space-y-2">
-            <AnimatePresence mode="popLayout">
-              {currentTrack && (
-                <div key={currentTrack.id} data-current="true">
-                  <QueueItemRow
-                    item={currentTrack}
-                    isCurrent
-                    isHost={isHost}
-                    currentUserId={currentUserId}
-                    onRemove={handleRemove}
-                    onDragStart={handleDragStart}
-                    onDragOver={handleDragOver}
-                    onDragEnd={handleDragEnd}
-                    onDrop={handleDrop}
-                    index={0}
-                  />
-                </div>
-              )}
+          <div className="space-y-2">
+            {currentTrack && (
+              <QueueItemRow
+                item={currentTrack}
+                isCurrent={true}
+                isHost={false}
+                currentUserId={currentUserId}
+                onRemove={() => {}}
+                onDragStart={() => {}}
+                onDragOver={() => {}}
+                onDragEnd={() => {}}
+                onDrop={() => {}}
+                index={0}
+              />
+            )}
 
-              {queueWithoutCurrent.map((item, idx) => (
+            <AnimatePresence mode="popLayout">
+              {queue.map((item, idx) => (
                 <QueueItemRow
                   key={item.id}
                   item={item}
                   isCurrent={false}
                   isHost={isHost}
                   currentUserId={currentUserId}
-                  onRemove={handleRemove}
+                  onRemove={removeSong}
                   onDragStart={handleDragStart}
                   onDragOver={handleDragOver}
                   onDragEnd={handleDragEnd}
                   onDrop={handleDrop}
-                  index={idx + 1}
+                  index={currentTrack ? idx + 1 : idx}
                 />
               ))}
             </AnimatePresence>
