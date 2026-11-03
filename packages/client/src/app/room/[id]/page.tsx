@@ -119,12 +119,11 @@ export default function RoomPage() {
           }
         }
 
-        const myMember = data.members.find((member: any) =>
-          member.userId === user?.id ||
-          member.user_id === user?.id
-        );
-
-        const isRoomHost = Boolean((myMember as any)?.isHost || (myMember as any)?.is_host || (data.room as any)?.hostId === user?.id || (data.room as any)?.host_id === user?.id); setIsHost(isRoomHost);
+        const storedUid = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('auth-storage') || '{}')?.state?.user?.id : null;
+        const currentUid = user?.id || storedUid;
+        const myMember = data.members.find((member: any) => currentUid && (member.userId === currentUid || member.user_id === currentUid));
+        const isRoomHost = Boolean((myMember as any)?.isHost || (myMember as any)?.is_host || (currentUid && ((data.room as any)?.hostId === currentUid || (data.room as any)?.host_id === currentUid)));
+        setIsHost(isRoomHost);
         setPageState('ready');
       } catch (err) {
         if (cancelled) return;

@@ -42,9 +42,11 @@ export function registerRoomHandlers(
   socket.on('join_room', async (payload) => {
     try {
       const userId = socket.data.userId
-      const { roomCode, nickname } = payload
-
-      const room = await roomService.getRoomByCode(roomCode)
+      const { roomCode, nickname } = payload;
+      const roomId = (payload as any).roomId;
+      let room: any = null;
+      if (roomCode) room = await roomService.getRoomByCode(roomCode);
+      else if (roomId) { const rd = await roomService.getRoom(roomId); room = rd?.room; }
       if (!room) {
         socket.emit('error', { message: 'Room not found or inactive', code: 'ROOM_NOT_FOUND' })
         return

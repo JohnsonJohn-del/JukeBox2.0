@@ -88,7 +88,7 @@ export function getPlaybackState(roomId: string): PlaybackState {
   }
 }
 
-async function verifyIsHost(roomId: string, userId: string): Promise<boolean> {
+export async function verifyIsHost(roomId: string, userId: string): Promise<boolean> {
   try {
     const db = getDbClient()
     const { data: member } = await db

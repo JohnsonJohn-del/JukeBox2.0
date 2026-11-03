@@ -47,13 +47,20 @@ export const useRoomStore = create<RoomState>()((set) => ({
     })),
 
   setHost: (hostId) =>
-    set((state) => ({
-      isHost: hostId === state.room?.hostId,
-      members: state.members.map((m) => ({
-        ...m,
-        isHost: m.userId === hostId,
-      })),
-    })),
+    set((state) => {
+      const currentUserId =
+        typeof window !== 'undefined'
+          ? JSON.parse(localStorage.getItem('auth-storage') || '{}')?.state?.user?.id
+          : null;
+      return {
+        isHost: Boolean(currentUserId && hostId === currentUserId),
+        room: state.room ? { ...state.room, hostId } : null,
+        members: state.members.map((m) => ({
+          ...m,
+          isHost: m.userId === hostId,
+        })),
+      };
+    }),
 
   leaveRoom: () =>
     set({

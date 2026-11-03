@@ -110,7 +110,15 @@ export async function joinRoom(
     .maybeSingle()
 
   if (existingMember) {
-    throw new AppError('You are already in this room', 409, 'ALREADY_MEMBER')
+    const { data: member } = await db
+      .from('room_members')
+      .select('*')
+      .eq('room_id', room.id)
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (member) {
+      return { room, member }
+    }
   }
 
   const memberId = uuidv4()

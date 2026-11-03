@@ -532,7 +532,7 @@ export function Player() {
               {/* YouTube IFrame Player Container (Unmanaged ref node so React reconciler never destroys it) */}
               <div
                 ref={playerContainerRef}
-                className="absolute inset-0 w-full h-full z-10 pointer-events-auto"
+                className={`absolute inset-0 w-full h-full z-10 ${isHost ? 'pointer-events-auto' : 'pointer-events-none'}`}
               />
 
               {/* Waiting for Selection State (When queue is completely empty) */}
@@ -632,8 +632,8 @@ export function Player() {
               onClick={handleSeek}
               onMouseMove={handleSeekHover}
               onMouseLeave={() => setSeekHover(null)}
-              className="group relative h-3.5 cursor-pointer rounded-full jukebox-progress-track"
-              title={isHost ? 'Click to seek' : 'Only host can seek'}
+              className={`group relative h-3.5 rounded-full jukebox-progress-track ${isHost ? 'cursor-pointer' : 'cursor-default pointer-events-none'}`}
+              title={isHost ? 'Click to seek' : 'Playback synchronized with host'}
             >
               <motion.div
                 className="absolute inset-y-0 left-0 rounded-full jukebox-progress-fill"
@@ -662,42 +662,55 @@ export function Player() {
             </div>
           </div>
 
-          {/* Quick Player Controls (Mobile / In-Panel) */}
-          <div className="mt-4 flex items-center justify-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handlePrevious}
-              disabled={!isHost}
-              className="h-10 w-10 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold hover:bg-jukebox-gold/10 hover:text-jukebox-cream disabled:opacity-30"
-              title="Previous Song"
-            >
-              <SkipBack className="h-5 w-5" />
-            </Button>
+          {/* Quick Player Controls (Host Only) or Guest Locked Status */}
+          {isHost ? (
+            <div className="mt-4 flex items-center justify-center gap-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handlePrevious}
+                className="h-10 w-10 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold hover:bg-jukebox-gold/10 hover:text-jukebox-cream cursor-pointer"
+                title="Previous Song"
+              >
+                <SkipBack className="h-5 w-5" />
+              </Button>
 
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-              onClick={handlePlayPause}
-              className="jukebox-chrome-button flex h-14 w-14 items-center justify-center rounded-full shadow-lg cursor-pointer"
-            >
-              {isPlaying ? (
-                <Pause className="h-6 w-6 text-jukebox-black" />
-              ) : (
-                <Play className="ml-0.5 h-6 w-6 text-jukebox-black" />
-              )}
-            </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.92 }}
+                onClick={handlePlayPause}
+                className="jukebox-chrome-button flex h-14 w-14 items-center justify-center rounded-full shadow-lg cursor-pointer"
+                title={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isPlaying ? (
+                  <Pause className="h-6 w-6 text-jukebox-black" />
+                ) : (
+                  <Play className="ml-0.5 h-6 w-6 text-jukebox-black" />
+                )}
+              </motion.button>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleSkip}
-              disabled={!isHost}
-              className="h-10 w-10 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold hover:bg-jukebox-gold/10 hover:text-jukebox-cream disabled:opacity-30"
-              title="Next Song"
-            >
-              <SkipForward className="h-5 w-5" />
-            </Button>
-          </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleSkip}
+                className="h-10 w-10 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold hover:bg-jukebox-gold/10 hover:text-jukebox-cream cursor-pointer"
+                title="Next Song"
+              >
+                <SkipForward className="h-5 w-5" />
+              </Button>
+            </div>
+          ) : (
+            <div className="mt-4 flex items-center justify-center">
+              <div className="flex items-center gap-2.5 px-5 py-2 rounded-full border border-jukebox-gold/30 bg-black/60 shadow-lg backdrop-blur-md">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <span className="text-[11px] font-black uppercase tracking-wider text-jukebox-gold">
+                  Audio & Video Locked to Host
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

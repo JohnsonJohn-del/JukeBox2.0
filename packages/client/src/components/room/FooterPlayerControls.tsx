@@ -44,7 +44,7 @@ export function FooterPlayerControls() {
   const trackHasVideoCounterpart = Boolean(currentTrack?.hasVideo || currentTrack?.musicVideoId);
 
   const handlePlayPause = useCallback(() => {
-    if (!currentTrack) return;
+    if (!currentTrack || !isHost) return;
 
     if (isPlaying) {
       playerControls?.pause();
@@ -154,42 +154,50 @@ export function FooterPlayerControls() {
         {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
       </Button>
 
-      {/* Playback Transport Buttons */}
-      <div className="flex items-center gap-1 sm:gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handlePrevious}
-          disabled={!isHost}
-          className="h-9 w-9 shrink-0 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold/80 hover:bg-jukebox-gold/10 hover:text-jukebox-cream disabled:opacity-30"
-          title={isHost ? "Previous Track" : "Only host can control playback"}
-        >
-          <SkipBack className="h-4 w-4" />
-        </Button>
+      {/* Playback Transport Buttons (Host Only) or Guest Locked Status */}
+      {isHost ? (
+        <div className="flex items-center gap-1 sm:gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handlePrevious}
+            className="h-9 w-9 shrink-0 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold/80 hover:bg-jukebox-gold/10 hover:text-jukebox-cream cursor-pointer"
+            title="Previous Track"
+          >
+            <SkipBack className="h-4 w-4" />
+          </Button>
 
-        <motion.button
-          whileTap={{ scale: 0.92 }}
-          onClick={handlePlayPause}
-          className="jukebox-chrome-button flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-full"
-        >
-          {isPlaying ? (
-            <Pause className="h-5 w-5 sm:h-6 sm:w-6 text-jukebox-black" />
-          ) : (
-            <Play className="ml-0.5 h-5 w-5 sm:h-6 sm:w-6 text-jukebox-black" />
-          )}
-        </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.92 }}
+            onClick={handlePlayPause}
+            className="jukebox-chrome-button flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-full cursor-pointer"
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? (
+              <Pause className="h-5 w-5 sm:h-6 sm:w-6 text-jukebox-black" />
+            ) : (
+              <Play className="ml-0.5 h-5 w-5 sm:h-6 sm:w-6 text-jukebox-black" />
+            )}
+          </motion.button>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleNext}
-          disabled={!isHost}
-          className="h-9 w-9 shrink-0 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold/80 hover:bg-jukebox-gold/10 hover:text-jukebox-cream disabled:opacity-30"
-          title={isHost ? "Next Track" : "Only host can control playback"}
-        >
-          <SkipForward className="h-4 w-4" />
-        </Button>
-      </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleNext}
+            className="h-9 w-9 shrink-0 rounded-full border border-jukebox-gold/20 bg-black/40 text-jukebox-gold/80 hover:bg-jukebox-gold/10 hover:text-jukebox-cream cursor-pointer"
+            title="Next Track"
+          >
+            <SkipForward className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-jukebox-gold/30 bg-black/50 shadow-sm">
+          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-[10px] font-black uppercase tracking-wider text-jukebox-gold">
+            Host Controls Playback
+          </span>
+        </div>
+      )}
 
       <div className="min-w-0 flex-1">
         <div className="mb-2 flex items-center justify-between gap-3">
@@ -252,8 +260,8 @@ export function FooterPlayerControls() {
         <div
           ref={progressRef}
           onClick={handleSeek}
-          className="group relative h-3 cursor-pointer rounded-full jukebox-progress-track"
-          title={isHost ? 'Click to seek' : 'Only host can seek'}
+          className={`group relative h-3 rounded-full jukebox-progress-track ${isHost ? 'cursor-pointer' : 'cursor-default pointer-events-none'}`}
+          title={isHost ? 'Click to seek' : 'Playback locked to host'}
         >
           <motion.div
             className="absolute inset-y-0 left-0 rounded-full jukebox-progress-fill"

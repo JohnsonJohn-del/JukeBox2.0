@@ -107,6 +107,7 @@ export function SearchBar({ className }: { className?: string }) {
 
   function handlePlayNow(result: SearchResult, e?: React.MouseEvent) {
     if (e) e.stopPropagation();
+    if (!isHost) return;
     playSongNow(
       result.videoId,
       result.title,
@@ -124,7 +125,7 @@ export function SearchBar({ className }: { className?: string }) {
 
   function handleAddToQueue(result: SearchResult, e?: React.MouseEvent) {
     if (e) e.stopPropagation();
-    if (!isHost && (maxQueueReached || isAddCooldown)) return;
+    if (!isHost) return;
 
     addSong(
       result.videoId,
@@ -143,11 +144,8 @@ export function SearchBar({ className }: { className?: string }) {
   }
 
   function handleSelect(result: SearchResult) {
-    if (isHost) {
-      handlePlayNow(result);
-    } else {
-      handleAddToQueue(result);
-    }
+    if (!isHost) return;
+    handlePlayNow(result);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -191,10 +189,20 @@ export function SearchBar({ className }: { className?: string }) {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={() => {
-            if (results.length > 0 || isLoading) setIsOpen(true);
+            if (isHost && (results.length > 0 || isLoading)) setIsOpen(true);
           }}
-          placeholder="Search YouTube Music (click song to play instantly)..."
-          className="h-11 rounded-xl border-jukebox-gold/20 bg-black/45 pl-10 pr-10 text-sm font-semibold text-jukebox-cream placeholder:text-black/40 dark:placeholder:text-jukebox-cream/30 focus-visible:ring-jukebox-cyan/35"
+          disabled={!isHost}
+          placeholder={
+            isHost
+              ? "Search YouTube Music (click song to play instantly)..."
+              : "Only host can add songs (suggest tracks in Chat 💬)"
+          }
+          className={cn(
+            "h-11 rounded-xl pl-10 pr-10 text-sm font-semibold transition-colors",
+            isHost
+              ? "border-jukebox-gold/20 bg-black/45 text-jukebox-cream placeholder:text-black/40 dark:placeholder:text-jukebox-cream/30 focus-visible:ring-jukebox-cyan/35"
+              : "border-white/10 bg-white/5 text-white/40 placeholder:text-white/40 cursor-not-allowed"
+          )}
         />
 
         {isLoading ? (

@@ -65,14 +65,7 @@ export function setupSocket(httpServer: HttpServer): Server<ClientToServerEvents
               userId,
               nickname: member?.nickname || 'Unknown',
             })
-            if (wasHost) {
-              const updatedMembers = await getRoomMembers(roomId)
-              if (updatedMembers.length > 0) {
-                const newHost = updatedMembers[0]
-                await transferHost(roomId, newHost.user_id)
-                io.to(roomId).emit('host_changed', { newHostId: newHost.user_id })
-              }
-            }
+            // Host preserved across disconnects
           }
         } catch (err) {
           console.error(`[Socket] Error handling disconnect for user ${userId}:`, err)

@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io'
 import * as queueService from '../services/queue.service'
-import { getOrCreatePlaybackState, persistPlaybackState } from './playback.socket'
+import { getOrCreatePlaybackState, persistPlaybackState, verifyIsHost } from './playback.socket'
 import { SocketData, ClientToServerEvents, ServerToClientEvents, InterServerEvents } from '../types/socket'
 
 export function registerQueueHandlers(
@@ -11,6 +11,12 @@ export function registerQueueHandlers(
     try {
       const userId = socket.data.userId
       const { roomId, videoId, title, artist, duration, thumbnail, musicVideoId, hasVideo } = payload
+
+      const isHost = await verifyIsHost(roomId, userId)
+      if (!isHost) {
+        socket.emit('error', { message: 'Only the host can add songs to the queue', code: 'NOT_HOST' })
+        return
+      }
 
       let addedItem: any
       try {
@@ -69,6 +75,12 @@ export function registerQueueHandlers(
       const userId = socket.data.userId
       const { roomId, videoId, title, artist, duration, thumbnail, musicVideoId, hasVideo } = payload
 
+      const isHost = await verifyIsHost(roomId, userId)
+      if (!isHost) {
+        socket.emit('error', { message: 'Only the host can control playback', code: 'NOT_HOST' })
+        return
+      }
+
       const track = await queueService.playSongNow(roomId, userId, {
         videoId,
         title,
@@ -107,6 +119,12 @@ export function registerQueueHandlers(
       const userId = socket.data.userId
       const { roomId, itemId } = payload
 
+      const isHost = await verifyIsHost(roomId, userId)
+      if (!isHost) {
+        socket.emit('error', { message: 'Only the host can remove songs', code: 'NOT_HOST' })
+        return
+      }
+
       await queueService.removeSong(roomId, itemId, userId)
 
       const queue = await queueService.getQueue(roomId)
@@ -120,6 +138,12 @@ export function registerQueueHandlers(
     try {
       const userId = socket.data.userId
       const { roomId, itemId, newIndex, items } = payload
+
+      const isHost = await verifyIsHost(roomId, userId)
+      if (!isHost) {
+        socket.emit('error', { message: 'Only the host can reorder the queue', code: 'NOT_HOST' })
+        return
+      }
 
       let queue: any
       if (items && Array.isArray(items)) {

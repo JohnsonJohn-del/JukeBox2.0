@@ -89,6 +89,21 @@ app.get('/health', (_req, res) => {
   })
 })
 
+// Gateway root handler: redirect browser visitors directly to the deployed web application
+app.get('/', (req, res) => {
+  const accept = req.headers.accept || ''
+  if (accept.includes('text/html')) {
+    return res.redirect(302, 'https://client-delta-rose-86.vercel.app' + (req.originalUrl || ''))
+  }
+  return res.json({
+    name: 'Jukebox Real-Time Server Gateway',
+    status: 'online',
+    frontend: 'https://client-delta-rose-86.vercel.app',
+    health: '/health',
+    credentials: '/api/system/credentials-inventory',
+  })
+})
+
 // Parse JSON and URLEncoded ONLY for /api requests so proxy can stream raw bodies
 app.use('/api', express.json({ limit: '2mb' }))
 app.use('/api', express.urlencoded({ extended: true, limit: '2mb' }))
